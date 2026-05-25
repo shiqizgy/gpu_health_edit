@@ -56,9 +56,67 @@
         <div class="panel" v-if="editStrategy" style="margin-top: 16px">
           <div class="panel-title">编辑策略：{{ editStrategy.name }}（版本 {{ editStrategy.version }}）</div>
           <div style="padding: 16px">
-            <n-form-item label="维度权重 (JSON)" label-placement="top">
-              <n-input v-model:value="dimWeightsText" type="textarea" :autosize="{ minRows: 2 }" class="mono" />
-            </n-form-item>
+                <!-- 维度权重输入区域 -->
+                <div class="dimension-weights">
+                  <div class="section-title">维度权重设置</div>
+                  <div class="weights-grid">
+                    <div class="weight-item">
+                      <label>硬件健康 (hardware)</label>
+                      <n-input-number
+                        v-model:value="dimensionWeights.hardware"
+                        :min="0"
+                        :max="1"
+                        :step="0.05"
+                        :precision="2"
+                        placeholder="0.00-1.00"
+                      />
+                    </div>
+                    <div class="weight-item">
+                      <label>运行稳定性 (stability)</label>
+                      <n-input-number
+                        v-model:value="dimensionWeights.stability"
+                        :min="0"
+                        :max="1"
+                        :step="0.05"
+                        :precision="2"
+                        placeholder="0.00-1.00"
+                      />
+                    </div>
+                    <div class="weight-item">
+                      <label>性能表现 (performance)</label>
+                      <n-input-number
+                        v-model:value="dimensionWeights.performance"
+                        :min="0"
+                        :max="1"
+                        :step="0.05"
+                        :precision="2"
+                        placeholder="0.00-1.00"
+                      />
+                    </div>
+                    <div class="weight-item">
+                      <label>运行环境 (environment)</label>
+                      <n-input-number
+                        v-model:value="dimensionWeights.environment"
+                        :min="0"
+                        :max="1"
+                        :step="0.05"
+                        :precision="2"
+                        placeholder="0.00-1.00"
+                      />
+                    </div>
+                  </div>
+
+                  <!-- 权重和验证显示 -->
+                  <div class="weight-summary">
+                    <div class="weight-total">
+                      权重总和: <span :class="{'valid': isWeightValid, 'invalid': !isWeightValid}">{{ weightTotal.toFixed(2) }}</span>
+                      <span v-if="!isWeightValid" class="error-text"> (必须为 1.00)</span>
+                    </div>
+                    <div class="weight-hint">
+                      提示：四个维度权重之和必须等于 1.00
+                    </div>
+                  </div>
+                </div>
             <div class="rules-title">指标权重 / 曲线 / 一票否决</div>
             <n-data-table :columns="ruleCols" :data="editRules" :bordered="false" size="small" :max-height="380" />
             <n-space justify="end" style="margin-top: 16px">
@@ -151,6 +209,24 @@ const editStrategy = ref<any>(null);
 const editRules = ref<any[]>([]);
 const dimWeightsText = ref("");
 
+// 添加维度权重状态
+const dimensionWeights = ref({
+  hardware: 0.45,
+  stability: 0.25,
+  performance: 0.20,
+  environment: 0.10
+});
+
+// 计算权重总和
+const weightTotal = computed(() => {
+  return Object.values(dimensionWeights.value).reduce((sum, weight) => sum + weight, 0);
+});
+
+// 验证权重是否有效
+const isWeightValid = computed(() => {
+  return Math.abs(weightTotal.value - 1.0) < 0.001; // 允许0.001的浮点误差
+});
+
 const strategyCols = [
   { title: "代码", key: "code", width: 160,
     render: (r: any) => h("span", { class: "mono", style: "font-size:12px" }, r.code) },
@@ -200,26 +276,65 @@ async function openEditStrategy(r: any) {
   const full = await api.strategy(r.id);
   editStrategy.value = full;
   editRules.value = (full.rules || []).map((x: any) => ({ ...x }));
-  dimWeightsText.value = full.dimension_weights;
+  // 解析维度权重到独立字段
+  try {
+    const parsedWeights = JSON.parse(full.dimension_weights);
+    dimensionWeights.value = {
+      hardware: parsedWeights.hardware || 0,
+      stability: parsedWeights.stability || 0,
+      performance: parsedWeights.performance || 0,
+      environment: parsedWeights.environment || 0
+    };
+  } catch (e) {
+    // 如果解析失败，使用默认值
+    dimensionWeights.value = {
+      hardware: 0.45,
+      stability: 0.25,
+      performance: 0.20,
+      environment: 0.10
+    };
+  }
 }
+
 async function saveStrategy() {
   try {
-    // 1. 维度权重(校验 JSON)
-    JSON.parse(dimWeightsText.value);
+    // 构建维度权重JSON
+    const dimensionWeightsJson = JSON.stringify({
+      hardware: parseFloat(dimensionWeights.value.hardware.toFixed(2)),
+      stability: parseFloat(dimensionWeights.value.stability.toFixed(2)),
+      performance: parseFloat(dimensionWeights.value.performance.toFixed(2)),
+      environment: parseFloat(dimensionWeights.value.environment.toFixed(2))
+    });
+
     await api.updateStrategyMeta(editStrategy.value.id, {
       name: editStrategy.value.name,
       description: editStrategy.value.description,
-      dimension_weights: dimWeightsText.value
+      dimension_weights: dimensionWeightsJson
     });
+
     // 2. 指标规则
-    await api.updateStrategyRules(editStrategy.value.id, editRules.value);
+    const processedRules = editRules.value.map(rule => {
+    // 创建新对象，确保curve_params正确处理
+    const processedRule = {
+      ...rule,
+      strategy_id: editStrategy.value.id,
+      // 关键修复：将空字符串转换为null
+      curve_params: (!rule.curve_params || rule.curve_params === "") ? null : rule.curve_params
+    };
+
+    return processedRule;
+  });
+
+    await api.updateStrategyRules(editStrategy.value.id, processedRules);
     message.success("策略已保存，评分服务将在 5 秒内热加载");
     editStrategy.value = null;
     await loadStrategies();
   } catch (e: any) {
-    message.error("保存失败：维度权重需为合法 JSON");
+    console.error('保存失败:', e);
+    message.error("保存失败：" + (e.message || "未知错误"));
   }
 }
+
 
 onMounted(() => { loadClusters(); loadStrategies(); });
 </script>
@@ -229,4 +344,69 @@ onMounted(() => { loadClusters(); loadStrategies(); });
 .hint { font-size: 12px; color: var(--text-2); }
 .pager { display: flex; justify-content: flex-end; padding: 14px 16px; }
 .rules-title { font-size: 12px; color: var(--text-1); margin: 16px 0 8px; letter-spacing: 0.05em; }
+.dimension-weights {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: var(--bg-2);
+  border-radius: 6px;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 12px;
+}
+
+.weights-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.weight-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.weight-item label {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.weight-summary {
+  padding: 12px;
+  background: var(--bg-1);
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.weight-total {
+  font-size: 13px;
+  color: var(--text-1);
+}
+
+.weight-total .valid {
+  color: var(--lv-healthy);
+  font-weight: 600;
+}
+
+.weight-total .invalid {
+  color: var(--lv-failed);
+  font-weight: 600;
+}
+
+.error-text {
+  color: var(--lv-failed);
+  font-size: 12px;
+}
+
+.weight-hint {
+  font-size: 11px;
+  color: var(--text-2);
+  margin-top: 4px;
+}
+
 </style>

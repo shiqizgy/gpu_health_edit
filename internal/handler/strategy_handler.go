@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -94,6 +95,14 @@ func (h *StrategyHandler) UpdateRules(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+
+	// 添加调试日志
+	log.Printf("接收到 %d 条规则", len(rules))
+	for i, rule := range rules {
+		log.Printf("规则 %d: MetricKey=%s, CurveType=%s, CurveParams=%s",
+			i, rule.MetricKey, rule.CurveType, rule.CurveParams)
+	}
+
 	if err := h.repo.ReplaceRules(id, rules); err != nil {
 		response.ServerError(c, err.Error())
 		return
