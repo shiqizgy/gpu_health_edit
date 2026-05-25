@@ -1,0 +1,26 @@
+server:
+  addr: ":8080"
+  mode: debug   # debug / release
+
+mysql:
+  # podman 部署时，容器名即主机名；本地直连用 127.0.0.1
+  dsn: "gpuhealth:gpuhealth@tcp(127.0.0.1:3306)/gpu_health?charset=utf8mb4&parseTime=true&loc=Local&collation=utf8mb4_unicode_ci"
+  max_open: 50
+  max_idle: 10
+  auto_migrate: true
+
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+
+scorer:
+  cron: "@every 1m"          # 每分钟评分一次
+  strategy_code: "default"   # 默认使用的评分策略
+
+simulator:
+  cron: "@every 1m"          # 每分钟生成一轮
+  gpu_count: 2000            # 仿真 2000 张卡
+  gpu_per_node: 8            # 每节点 8 卡
+  anomaly_rate: 0.10         # 10% 异常卡
+  metric_ttl: 300            # Redis 指标 5 分钟过期

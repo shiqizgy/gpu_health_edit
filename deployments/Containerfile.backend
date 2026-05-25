@@ -1,0 +1,19 @@
+# 多阶段构建：编译三个 Go 二进制（server / scorer / simulator）到一个轻量镜像。
+# 构建：podman build -t gpuhealth-backend -f deployments/Containerfile.backend .
+FROM docker.io/library/golang:1.22 AS builder
+WORKDIR /src
+COPY go.mod go.sum* ./
+RUN go mod download || true
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/server   ./cmd/server  && \
+    CGO_ENABLED=0 GOOS=linux go build -o /out/scorer    ./cmd/scorer  && \
+    CGO_ENABLED=0 GOOS=linux go build -o /out/simulator ./cmd/simulator
+
+FROM docker.io/library/alpine:3.20
+WORKDIR /app
+COPY --from=builder /out/server   /app/server
+COPY --from=builder /out/scorer   /app/scorer
+COPY --from=builder /out/simulator /app/simulator
+COPY configs /app/configs
+# 默认启动 API；scorer/simulator 通过覆盖 entrypoint 启动
+ENTRYPOINT ["/app/server"]

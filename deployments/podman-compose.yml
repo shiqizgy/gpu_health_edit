@@ -1,0 +1,46 @@
+# Podman Compose 文件：拉起 MySQL + Redis 两个后端依赖。
+# 使用方式：
+#   podman compose -f deployments/podman-compose.yml up -d
+# 或（旧版本）：
+#   podman-compose -f deployments/podman-compose.yml up -d
+#
+# 说明：
+#   - 应用本身（server/scorer/simulator）建议直接在宿主机用 go run 跑，
+#     连接这里暴露的 3306 / 6379 端口，开发调试最方便。
+#   - 若要把应用也容器化，见 deployments/Containerfile.* 和 pod.yaml。
+version: "3"
+
+services:
+  mysql:
+    image: docker.io/library/mysql:8.0
+    container_name: gpuhealth-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: gpu_health
+      MYSQL_USER: gpuhealth
+      MYSQL_PASSWORD: gpuhealth
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - gpuhealth-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpass"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: docker.io/library/redis:7-alpine
+    container_name: gpuhealth-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - gpuhealth-redis-data:/data
+
+volumes:
+  gpuhealth-mysql-data:
+  gpuhealth-redis-data:
