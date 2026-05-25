@@ -314,16 +314,30 @@ async function saveStrategy() {
 
     // 2. 指标规则
     const processedRules = editRules.value.map(rule => {
-    // 创建新对象，确保curve_params正确处理
-    const processedRule = {
-      ...rule,
-      strategy_id: editStrategy.value.id,
-      // 关键修复：将空字符串转换为null
-      curve_params: (!rule.curve_params || rule.curve_params === "") ? null : rule.curve_params
-    };
+      // 手动构建每个字段，确保格式正确
+      const newRule = {
+        id: rule.id || 0,
+        strategy_id: editStrategy.value.id,
+        metric_key: rule.metric_key || rule.metricKey,
+        weight: parseFloat(rule.weight) || 0,
+        curve_type: rule.curve_type || rule.curveType || 'none',
+        is_veto: Boolean(rule.is_veto || rule.isVeto),
+        veto_threshold: parseFloat(rule.veto_threshold || rule.vetoThreshold) || 0
+      };
 
-    return processedRule;
-  });
+      // 关键修复：确保curve_params永远不会是空字符串
+      const originalParams = rule.curve_params || rule.curveParams;
+      if (!originalParams || originalParams === "" || originalParams === "null") {
+        newRule.curve_params = null;
+      } else {
+        newRule.curve_params = originalParams;
+      }
+
+      return newRule;
+    });
+
+    // 添加前端调试
+    console.log('即将发送的规则数据:', JSON.stringify(processedRules, null, 2));
 
     await api.updateStrategyRules(editStrategy.value.id, processedRules);
     message.success("策略已保存，评分服务将在 5 秒内热加载");

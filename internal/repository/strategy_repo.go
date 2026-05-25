@@ -61,6 +61,10 @@ func (r *StrategyRepo) ReplaceRules(strategyID uint64, rules []model.StrategyMet
 		}
 		for i := range rules {
 			rules[i].StrategyID = strategyID
+			// 修复：确保curve_params不为空字符串
+			if rules[i].CurveParams == "" {
+				rules[i].CurveParams = "null" // 或者使用sql.NullString
+			}
 		}
 		if len(rules) > 0 {
 			if err := tx.Create(&rules).Error; err != nil {
