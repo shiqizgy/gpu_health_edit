@@ -15,8 +15,7 @@ import (
 )
 
 // SimulatorService 数据仿真服务。
-//
-// 对应需求四：模拟 2000 张 GPU，每分钟生成一条全量指标，正态分布，
+// 模拟 2000 张 GPU，每分钟生成一条全量指标，正态分布，
 // 正常值参考 DCGM 阈值，随机注入 10% 异常卡。
 //
 // 设计要点（保证本地负载小、运行快）：
@@ -25,10 +24,10 @@ import (
 //   - 异常卡在初始化时随机选定 10%，也支持通过 Redis 故障注入临时改变某卡状态。
 //   - 写 Redis 用 Pipeline 批量，2000 卡一次往返完成。
 type SimulatorService struct {
-	cfg    config.SimulatorConfig
-	redis  *redisclient.Client
-	topo   *repository.TopologyRepo
-	fleet  []*simGPU
+	cfg   config.SimulatorConfig
+	redis *redisclient.Client
+	topo  *repository.TopologyRepo
+	fleet []*simGPU
 }
 
 // simGPU 单卡仿真状态
@@ -41,13 +40,13 @@ type simGPU struct {
 	IsAnomaly bool // 初始化时随机选中的异常卡
 
 	// 计数器累计值（只增不减）
-	eccSBE, eccDBE             float64
-	pcieReplay, nvlinkCRC      float64
-	nvlinkRecovery             float64
-	thermalViolation           float64
-	correctableRemap           float64
-	uncorrectableRemap         float64
-	resetCount                 float64
+	eccSBE, eccDBE        float64
+	pcieReplay, nvlinkCRC float64
+	nvlinkRecovery        float64
+	thermalViolation      float64
+	correctableRemap      float64
+	uncorrectableRemap    float64
+	resetCount            float64
 }
 
 func NewSimulatorService(cfg config.SimulatorConfig, rc *redisclient.Client, topo *repository.TopologyRepo) *SimulatorService {
@@ -137,6 +136,9 @@ func (s *SimulatorService) InitFleet(ctx context.Context) error {
 
 // GenerateOnce 生成一轮全量指标并写入 Redis。
 func (s *SimulatorService) GenerateOnce(ctx context.Context) error {
+	//每轮先从数据库同步在线GPU列表，捕获前端动态新增/下线的卡
+	s.syncFleetFromDB()
+
 	if len(s.fleet) == 0 {
 		logger.L.Warn("仿真机群为空，请先 InitFleet")
 		return nil
@@ -168,6 +170,30 @@ func (s *SimulatorService) GenerateOnce(ctx context.Context) error {
 	return nil
 }
 
+func (s *SimulatorService) syncFleetFromDB() {
+	gpus, err := s.topo.AllOnlineGPUs()
+	if err != nil {
+		logger.L.Warnf("同步fleet读取数据库失败: %v", err)
+		return
+	}
+	//现有fleet建索引
+	existing := make(map[string]bool, len(s.fleet))
+	for _, g := range gpus {
+		if existing[g.UUID] {
+			continue
+		}
+		s.fleet = append(s.fleet, &simGPU{
+			UUID:      g.UUID,
+			ClusterID: g.ClusterID,
+			NodeID:    g.NodeID,
+			GPUIndex:  g.GPUIndex,
+			Model:     g.Model,
+			IsAnomaly: false, //新增默认健康
+		})
+		logger.L.Infof("仿真捕获新增 GPU: %s", g.UUID)
+	}
+}
+
 // sampleGPU 生成单卡一帧指标。mode 为手动注入的故障模式（空则按初始 IsAnomaly 决定）。
 func (s *SimulatorService) sampleGPU(g *simGPU, mode string) map[string]float64 {
 	// 决定本帧的"故障态"：手动注入 > 初始异常标记
@@ -182,10 +208,10 @@ func (s *SimulatorService) sampleGPU(g *simGPU, mode string) map[string]float64 
 	}
 
 	// ===== 基线（正常态，参考 DCGM 正常范围，正态分布）=====
-	temp := normal(62, 6)        // GPU 温度 ~62℃
-	memTemp := normal(70, 5)     // HBM 温度
-	power := normal(350, 60)     // 功耗 W
-	smClock := normal(1830, 30)  // SM 时钟 MHz
+	temp := normal(62, 6)                   // GPU 温度 ~62℃
+	memTemp := normal(70, 5)                // HBM 温度
+	power := normal(350, 60)                // 功耗 W
+	smClock := normal(1830, 30)             // SM 时钟 MHz
 	fbUsed := clamp(normal(0.5, 0.2), 0, 1) // 显存使用率
 	grActive := clamp(normal(0.6, 0.15), 0, 1)
 	smActive := clamp(grActive*0.95, 0, 1)
@@ -231,31 +257,31 @@ func (s *SimulatorService) sampleGPU(g *simGPU, mode string) map[string]float64 
 
 	return map[string]float64{
 		// environment
-		"DCGM_FI_DEV_GPU_TEMP":           round1(temp),
-		"DCGM_FI_DEV_MEMORY_TEMP":        round1(memTemp),
-		"DCGM_FI_DEV_POWER_USAGE":        round1(power),
-		"DCGM_FI_DEV_THERMAL_VIOLATION":  g.thermalViolation,
+		"DCGM_FI_DEV_GPU_TEMP":          round1(temp),
+		"DCGM_FI_DEV_MEMORY_TEMP":       round1(memTemp),
+		"DCGM_FI_DEV_POWER_USAGE":       round1(power),
+		"DCGM_FI_DEV_THERMAL_VIOLATION": g.thermalViolation,
 		// performance
-		"DCGM_FI_PROF_GR_ENGINE_ACTIVE":  round3(grActive),
-		"DCGM_FI_PROF_SM_ACTIVE":         round3(smActive),
+		"DCGM_FI_PROF_GR_ENGINE_ACTIVE":   round3(grActive),
+		"DCGM_FI_PROF_SM_ACTIVE":          round3(smActive),
 		"DCGM_FI_PROF_PIPE_TENSOR_ACTIVE": round3(tensorActive),
-		"DCGM_FI_PROF_DRAM_ACTIVE":       round3(dramActive),
-		"DCGM_FI_DEV_SM_CLOCK":           round1(smClock),
-		"DCGM_FI_DEV_FB_USED_PERCENT":    round3(fbUsed),
+		"DCGM_FI_PROF_DRAM_ACTIVE":        round3(dramActive),
+		"DCGM_FI_DEV_SM_CLOCK":            round1(smClock),
+		"DCGM_FI_DEV_FB_USED_PERCENT":     round3(fbUsed),
 		// hardware
-		"DCGM_FI_DEV_ECC_SBE_VOL_TOTAL":            g.eccSBE,
-		"DCGM_FI_DEV_ECC_DBE_VOL_TOTAL":            g.eccDBE,
-		"DCGM_FI_DEV_CORRECTABLE_REMAPPED_ROWS":    g.correctableRemap,
-		"DCGM_FI_DEV_UNCORRECTABLE_REMAPPED_ROWS":  g.uncorrectableRemap,
-		"DCGM_FI_DEV_ROW_REMAP_FAILURE":            boolToF(g.uncorrectableRemap > 0),
-		"DCGM_FI_DEV_PCIE_REPLAY_COUNTER":          g.pcieReplay,
+		"DCGM_FI_DEV_ECC_SBE_VOL_TOTAL":                 g.eccSBE,
+		"DCGM_FI_DEV_ECC_DBE_VOL_TOTAL":                 g.eccDBE,
+		"DCGM_FI_DEV_CORRECTABLE_REMAPPED_ROWS":         g.correctableRemap,
+		"DCGM_FI_DEV_UNCORRECTABLE_REMAPPED_ROWS":       g.uncorrectableRemap,
+		"DCGM_FI_DEV_ROW_REMAP_FAILURE":                 boolToF(g.uncorrectableRemap > 0),
+		"DCGM_FI_DEV_PCIE_REPLAY_COUNTER":               g.pcieReplay,
 		"DCGM_FI_DEV_NVLINK_CRC_FLIT_ERROR_COUNT_TOTAL": g.nvlinkCRC,
 		"DCGM_FI_DEV_NVLINK_RECOVERY_ERROR_COUNT_TOTAL": g.nvlinkRecovery,
-		"DCGM_FI_DEV_FABRIC_HEALTH_MASK":           fabricMask,
+		"DCGM_FI_DEV_FABRIC_HEALTH_MASK":                fabricMask,
 		// stability
-		"DCGM_FI_DEV_XID_ERRORS":          xid,
+		"DCGM_FI_DEV_XID_ERRORS":           xid,
 		"DCGM_FI_DEV_CLOCKS_EVENT_REASONS": clockEvent,
-		"DCGM_FI_DEV_GPU_RESET_COUNT":     g.resetCount,
+		"DCGM_FI_DEV_GPU_RESET_COUNT":      g.resetCount,
 	}
 }
 

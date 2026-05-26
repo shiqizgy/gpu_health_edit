@@ -76,18 +76,21 @@ async function loadClusters() {
     key: "c-" + c.id,
     label: `${c.name} (${c.code})`,
     raw: c, type: "cluster",
-    isLeaf: false
+    isLeaf: false，
+    children: undefined //undefined 才会触发 on-load
   }));
 }
 
 // 懒加载：点击集群→节点，点击节点→GPU
+//加载完直接给node.children赋值，tree会自动渲染
 async function onLoad(node: any) {
   if (node.type === "cluster") {
     const nodes = await api.topoNodes(node.raw.id);
     node.children = (nodes || []).map((n: any) => ({
       key: "n-" + n.id,
       label: `${n.hostname} · ${n.gpu_count}卡`,
-      raw: n, type: "node", isLeaf: false
+      raw: n, type: "node", isLeaf: false,
+      children: undefined
     }));
   } else if (node.type === "node") {
     const gpus = await api.topoGPUs(node.raw.id);

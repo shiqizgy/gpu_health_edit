@@ -49,7 +49,7 @@
           </n-gi>
           <n-gi>
             <n-form-item label="所属设备">
-              <n-input v-model:value="form.device_type" placeholder="gpu" />
+              <n-select v-model:value="form.device_type" :options="deviceOptions" />
             </n-form-item>
           </n-gi>
           <n-gi>
@@ -97,9 +97,24 @@ const dimOptions = [
   { label: "硬件健康 hardware", value: "hardware" },
   { label: "运行稳定性 stability", value: "stability" }
 ];
+
+// 设备类型三类
+const deviceOptions = [
+  { label: "GPU", value: "gpu" },
+  { label: "服务器", value: "server" },
+  { label: "网络设备", value: "network" }
+];
+const deviceLabels: Record<string, string> = {
+  gpu: "GPU", server: "服务器", network: "网络设备"
+};
+
 const typeOptions = [
   { label: "gauge 瞬时值", value: "gauge" },
-  { label: "counter 计数器", value: "counter" }
+  { label: "counter 计数器", value: "counter" },
+  { label: "enum 枚举", value: "enum" },
+  { label: "histogram 直方图", value: "histogram" },
+  { label: "boolean 布尔", value: "boolean" },
+  { label: "other 其他", value: "other" }
 ];
 
 const dimLabels: Record<string, string> = {
@@ -126,6 +141,8 @@ const columns = [
   { title: "显示名", key: "display_name", width: 140 },
   { title: "维度", key: "dimension", width: 90,
     render: (r: any) => h(NTag, { size: "small", bordered: false }, () => dimLabels[r.dimension] || r.dimension) },
+  { title: "所属设备", key: "device_type", width: 100,
+    render: (r: any) => h(NTag, { size: "small", type: "info", bordered: false }, () => deviceLabels[r.device_type] || r.device_type) },
   { title: "类型", key: "metric_type", width: 90 },
   { title: "单位", key: "unit", width: 70 },
   { title: "正常范围", key: "normal_range", width: 100 },
