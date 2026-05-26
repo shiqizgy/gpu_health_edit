@@ -79,13 +79,11 @@ func (s *SimulatorService) InitFleet(ctx context.Context) error {
 		}
 		if err := s.topo.CreateCluster(c); err != nil {
 			// 已存在则查回（重复初始化容错）
-			clusters, _ := s.topo.ListClusters()
-			for _, cc := range clusters {
-				if cc.Code == c.Code {
-					c.ID = cc.ID
-					break
-				}
+			var existing model.Cluster
+			if err := s.topo.DB().WithContext(ctx).Where("code=?", c.Code).First(&existing).Error; err != nil {
+				return fmt.Errorf("查询集群 %s 失败: %w", c.Code, err)
 			}
+			c.ID = existing.ID
 		}
 		clusterIDs[i] = c.ID
 	}
@@ -102,14 +100,11 @@ func (s *SimulatorService) InitFleet(ctx context.Context) error {
 			GPUCount:  perNode,
 		}
 		if err := s.topo.CreateNode(node); err != nil {
-			// 容错：已存在则查回
-			nodes, _ := s.topo.ListNodesByCluster(clusterID)
-			for _, nn := range nodes {
-				if nn.Hostname == node.Hostname {
-					node.ID = nn.ID
-					break
-				}
+			var existing model.Node
+			if err := s.topo.DB().WithContext(ctx).Where("hostname = ?", node.Hostname).First(&existing).Error; err != nil {
+				return fmt.Errorf("查询节点 %s 失败: %w", node.Hostname, err)
 			}
+			node.ID = existing.ID
 		}
 
 		for j := 0; j < perNode && gpuSeq < total; j++ {
@@ -170,6 +165,8 @@ func (s *SimulatorService) GenerateOnce(ctx context.Context) error {
 	return nil
 }
 
+// syncFleetFromDB 把数据库里的在线 GPU 同步进内存 fleet。
+// 新增的卡补进来（给默认仿真状态），让前端扩容的卡也能被仿真生成指标。
 func (s *SimulatorService) syncFleetFromDB() {
 	gpus, err := s.topo.AllOnlineGPUs()
 	if err != nil {
@@ -178,6 +175,10 @@ func (s *SimulatorService) syncFleetFromDB() {
 	}
 	//现有fleet建索引
 	existing := make(map[string]bool, len(s.fleet))
+	for _, g := range s.fleet {
+		existing[g.UUID] = true
+	}
+	//新增的卡补进来
 	for _, g := range gpus {
 		if existing[g.UUID] {
 			continue
