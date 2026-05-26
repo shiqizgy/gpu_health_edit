@@ -76,7 +76,7 @@ async function loadClusters() {
     key: "c-" + c.id,
     label: `${c.name} (${c.code})`,
     raw: c, type: "cluster",
-    isLeaf: false，
+    isLeaf: false,
     children: undefined //undefined 才会触发 on-load
   }));
 }
