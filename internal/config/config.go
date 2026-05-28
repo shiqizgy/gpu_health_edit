@@ -13,6 +13,7 @@ type Config struct {
 	Redis     RedisConfig     `yaml:"redis"`
 	Scorer    ScorerConfig    `yaml:"scorer"`
 	Simulator SimulatorConfig `yaml:"simulator"`
+	Assistant AssistantConfig `yaml:"assistant"`
 }
 
 type ServerConfig struct {
@@ -46,6 +47,15 @@ type SimulatorConfig struct {
 	GPUPerNode  int     `yaml:"gpu_per_node"` // 每节点 GPU 数
 	AnomalyRate float64 `yaml:"anomaly_rate"` // 异常卡比例
 	MetricTTL   int     `yaml:"metric_ttl"`   // Redis 指标过期秒数
+}
+
+type AssistantConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	BaseURL    string `yaml:"base_url"`
+	APIKey     string `yaml:"api_key"`
+	Model      string `yaml:"model"`
+	TimeoutSec int    `yaml:"timeout_sec"`
+	MaxHistory int    `yaml:"max_history"`
 }
 
 func Load(path string) (*Config, error) {

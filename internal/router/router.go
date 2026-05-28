@@ -3,14 +3,16 @@ package router
 import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/gpu-health/platform/internal/config"
 	"github.com/gpu-health/platform/internal/handler"
 	"github.com/gpu-health/platform/internal/redisclient"
 	"github.com/gpu-health/platform/internal/repository"
+	"github.com/gpu-health/platform/internal/service/assistant"
 	"gorm.io/gorm"
 )
 
 // Setup 装配所有路由。handler 在这里实例化，依赖通过参数注入，结构清晰。
-func Setup(db *gorm.DB, rc *redisclient.Client) *gin.Engine {
+func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantConfig) *gin.Engine {
 	r := gin.Default()
 
 	// CORS：允许前端 dev server
@@ -34,6 +36,10 @@ func Setup(db *gorm.DB, rc *redisclient.Client) *gin.Engine {
 	topoH := handler.NewTopologyHandler(topoRepo)
 	healthH := handler.NewHealthHandler(healthRepo)
 	faultH := handler.NewFaultHandler(faultRepo, rc)
+
+	// AI 助手(需要多个 repo + Redis + 配置)
+	assistantSvc := assistant.NewService(assistantCfg, topoRepo, healthRepo, metricRepo, faultRepo, rc)
+	assistantH := handler.NewAssistantHandler(assistantSvc)
 
 	api := r.Group("/api/v1")
 	{
@@ -77,6 +83,10 @@ func Setup(db *gorm.DB, rc *redisclient.Client) *gin.Engine {
 		// 故障注入（演示）
 		api.POST("/faults/inject", faultH.InjectFault)
 		api.GET("/faults/inject", faultH.ListFaults)
+
+		// AI 故障分析助手(SSE 流式)
+		api.POST("/assistant/chat", assistantH.Chat)
+
 	}
 
 	return r

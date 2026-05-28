@@ -38,9 +38,13 @@ func main() {
 		logger.L.Fatalf("连接 Redis 失败: %v", err)
 	}
 	logger.L.Info("Redis 已连接")
-	defer rc.Close()
+	defer func() {
+		if err := rc.Close(); err != nil {
+			logger.L.Errorf("关闭 Redis 失败: %v", err)
+		}
+	}()
 
-	r := router.Setup(db, rc)
+	r := router.Setup(db, rc, cfg.Assistant)
 	logger.L.Infof("API 服务启动于 %s", cfg.Server.Addr)
 	if err := r.Run(cfg.Server.Addr); err != nil {
 		logger.L.Fatalf("服务启动失败: %v", err)

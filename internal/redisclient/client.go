@@ -3,9 +3,11 @@ package redisclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/gpu-health/platform/internal/config"
+	"github.com/gpu-health/platform/pkg/logger"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -31,9 +33,15 @@ func New(cfg config.RedisConfig) (*Client, error) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
 	if err := rdb.Ping(ctx).Err(); err != nil {
+		//连接失败时关闭客户端，避免资源泄漏
+		if err := rdb.Close(); err != nil {
+			logger.L.Errorf("客户端关闭失败: %v", err)
+		}
 		return nil, err
 	}
+
 	return &Client{rdb: rdb}, nil
 }
 
@@ -116,6 +124,23 @@ func (c *Client) ReadAllFrames(ctx context.Context) ([]MetricFrame, error) {
 		}
 	}
 	return frames, nil
+}
+
+// ReadFrame 按 UUID 读取单张卡的最新指标
+func (c *Client) ReadFrame(ctx context.Context, uuid string) (*MetricFrame, error) {
+	key := metricKeyPrefix + uuid
+	s, err := c.rdb.Get(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil, nil // 该卡暂无实时数据
+	}
+	if err != nil {
+		return nil, err
+	}
+	var f MetricFrame
+	if err := json.Unmarshal([]byte(s), &f); err != nil {
+		return nil, err
+	}
+	return &f, nil
 }
 
 // FaultMode 故障注入相关（演示用）。

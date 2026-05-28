@@ -77,7 +77,11 @@ func main() {
 	logger.L.Infof("仿真服务启动，调度=%s", cronExpr)
 
 	// 启动即生成一轮
-	go sim.GenerateOnce(ctx)
+	go func() {
+		if err := sim.GenerateOnce(ctx); err != nil {
+			logger.L.Errorf("初始数据生成失败: %v", err)
+		}
+	}()
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)

@@ -24,3 +24,11 @@ simulator:
   gpu_per_node: 8            # 每节点 8 卡
   anomaly_rate: 0.10         # 10% 异常卡
   metric_ttl: 300            # Redis 指标 5 分钟过期
+
+assistant:
+  enabled: true              # 开启自动故障修复
+  base_url: "https://api.deepseek.com/v1"
+  api_key: "sk-fbac660024354b928151ae92de401e5c"
+  model: "deepseek-chat"
+  timeout_sec: 60
+  max_history: 10            # 最多保留 10 条对话历史
