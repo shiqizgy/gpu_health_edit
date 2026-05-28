@@ -85,3 +85,41 @@ func (r *TopologyRepo) AllOnlineGPUs() ([]model.GPUCard, error) {
 func (r *TopologyRepo) DB() *gorm.DB {
 	return r.db
 }
+
+// GPUWithStrategy 给评分服务使用:每张卡带上自己的 strategy_id 和所属集群的 strategy_id
+type GPUWithStrategy struct {
+	UUID              string  `gorm:"column:uuid"`
+	ClusterID         uint64  `gorm:"column:cluster_id"`
+	CardStrategyID    *uint64 `gorm:"column:card_strategy_id"`
+	ClusterStrategyID *uint64 `gorm:"column:cluster_strategy_id"`
+}
+
+// AllOnlineGPUsWithStrategy 查所有在线 GPU,带卡级和集群级 strategy_id
+func (r *TopologyRepo) AllOnlineGPUsWithStrategy() ([]GPUWithStrategy, error) {
+	var out []GPUWithStrategy
+	err := r.db.Table("gpu_card AS g").
+		Select("g.uuid, g.cluster_id, g.strategy_id AS card_strategy_id, c.strategy_id AS cluster_strategy_id").
+		Joins("JOIN cluster c ON c.id = g.cluster_id").
+		Where("g.status = ?", "online").
+		Scan(&out).Error
+	return out, err
+}
+
+// BindClusterStrategy 给集群绑定策略
+func (r *TopologyRepo) BindClusterStrategy(clusterID uint64, strategyID *uint64) error {
+	return r.db.Model(&model.Cluster{}).Where("id = ?", clusterID).
+		Update("strategy_id", strategyID).Error
+}
+
+// BindGPUStrategy 给单卡绑定策略
+func (r *TopologyRepo) BindGPUStrategy(uuid string, strategyID *uint64) error {
+	return r.db.Model(&model.GPUCard{}).Where("uuid = ?", uuid).
+		Update("strategy_id", strategyID).Error
+}
+
+// CountStrategyUsage 统计某策略被多少集群和卡绑定(删除策略前检查用)
+func (r *TopologyRepo) CountStrategyUsage(strategyID uint64) (clusterCnt, gpuCnt int64) {
+	r.db.Model(&model.Cluster{}).Where("strategy_id = ?", strategyID).Count(&clusterCnt)
+	r.db.Model(&model.GPUCard{}).Where("strategy_id = ?", strategyID).Count(&gpuCnt)
+	return
+}

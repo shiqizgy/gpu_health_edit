@@ -11,10 +11,13 @@ import (
 )
 
 // StrategyHandler 评分策略（需求 2.3-2：前端可修改指标权重和维度权重，配置为策略组）
-type StrategyHandler struct{ repo *repository.StrategyRepo }
+type StrategyHandler struct {
+	repo *repository.StrategyRepo
+	topo *repository.TopologyRepo
+}
 
-func NewStrategyHandler(repo *repository.StrategyRepo) *StrategyHandler {
-	return &StrategyHandler{repo: repo}
+func NewStrategyHandler(repo *repository.StrategyRepo, topo *repository.TopologyRepo) *StrategyHandler {
+	return &StrategyHandler{repo: repo, topo: topo}
 }
 
 func (h *StrategyHandler) List(c *gin.Context) {
@@ -112,7 +115,57 @@ func (h *StrategyHandler) UpdateRules(c *gin.Context) {
 
 func (h *StrategyHandler) Delete(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	// 保护 default 策略
+	s, err := h.repo.GetByID(id)
+	if err != nil {
+		response.Fail(c, 404, "策略不存在")
+		return
+	}
+	if s.IsDefault {
+		response.BadRequest(c, "默认策略不可删除")
+		return
+	}
+	// 检查是否还有集群/卡在用它
+	cc, gc := h.topo.CountStrategyUsage(id)
+	if cc > 0 || gc > 0 {
+		response.BadRequest(c, "该策略仍被 "+strconv.FormatInt(cc, 10)+" 个集群、"+strconv.FormatInt(gc, 10)+" 张卡使用,请先解绑")
+		return
+	}
 	if err := h.repo.Delete(id); err != nil {
+		response.ServerError(c, err.Error())
+		return
+	}
+	response.OK(c, nil)
+}
+
+// BindClusterStrategy 给集群绑定/解绑策略。body: {"strategy_id": 2} 绑定;{"strategy_id": null} 解绑
+func (h *StrategyHandler) BindClusterStrategy(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	var req struct {
+		StrategyID *uint64 `json:"strategy_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if err := h.topo.BindClusterStrategy(id, req.StrategyID); err != nil {
+		response.ServerError(c, err.Error())
+		return
+	}
+	response.OK(c, nil)
+}
+
+// BindGPUStrategy 给单卡绑定/解绑策略
+func (h *StrategyHandler) BindGPUStrategy(c *gin.Context) {
+	uuid := c.Param("uuid")
+	var req struct {
+		StrategyID *uint64 `json:"strategy_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if err := h.topo.BindGPUStrategy(uuid, req.StrategyID); err != nil {
 		response.ServerError(c, err.Error())
 		return
 	}

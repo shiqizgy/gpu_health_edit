@@ -8,7 +8,7 @@ import (
 	"github.com/gpu-health/platform/pkg/response"
 )
 
-// HealthHandler 健康值（需求 2.3-2：集群表格 → 点击展开单卡评分）
+// HealthHandler 健康值（集群表格 → 点击展开单卡评分）
 type HealthHandler struct {
 	health *repository.HealthRepo
 }
@@ -17,7 +17,7 @@ func NewHealthHandler(health *repository.HealthRepo) *HealthHandler {
 	return &HealthHandler{health: health}
 }
 
-// ClusterSummaries 集群健康汇总表格（查预聚合表，毫秒级）
+// ClusterSummaries 集群健康汇总表格（查预聚合表）
 func (h *HealthHandler) ClusterSummaries(c *gin.Context) {
 	list, err := h.health.ListClusterSummaries()
 	if err != nil {
@@ -27,7 +27,7 @@ func (h *HealthHandler) ClusterSummaries(c *gin.Context) {
 	response.OK(c, list)
 }
 
-// ClusterGPUs 点击某集群：分页展示该集群内每张 GPU 的评分（坏卡置顶）
+// ClusterGPUs 点击某个集群：分页展示该集群内每张 GPU 的评分（坏卡置顶）
 func (h *HealthHandler) ClusterGPUs(c *gin.Context) {
 	clusterID, _ := strconv.ParseUint(c.Param("clusterId"), 10, 64)
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))

@@ -35,6 +35,13 @@ export const api = {
   updateStrategyRules: (id: number, rules: any[]) => http.put<any, any>(`/strategies/${id}/rules`, rules),
   deleteStrategy: (id: number) => http.delete<any, any>(`/strategies/${id}`),
 
+  // 策略绑定
+  bindClusterStrategy: (clusterId: number, strategyId: number | null) =>
+      http.put<any, any>(`/clusters/${clusterId}/strategy`, { strategy_id: strategyId }),
+  bindGPUStrategy: (uuid: string, strategyId: number | null) =>
+      http.put<any, any>(`/gpus/${uuid}/strategy`, { strategy_id: strategyId }),
+
+
   // 集群拓扑（三级树）
   topoClusters: () => http.get<any, any>("/topology/clusters"),
   topoNodes: (clusterId: number) => http.get<any, any>(`/topology/clusters/${clusterId}/nodes`),

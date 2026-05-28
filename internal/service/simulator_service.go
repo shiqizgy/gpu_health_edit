@@ -138,6 +138,7 @@ func (s *SimulatorService) GenerateOnce(ctx context.Context) error {
 		logger.L.Warn("仿真机群为空，请先 InitFleet")
 		return nil
 	}
+
 	start := time.Now()
 	ttl := time.Duration(s.cfg.MetricTTL) * time.Second
 	if ttl <= 0 {
@@ -191,7 +192,7 @@ func (s *SimulatorService) syncFleetFromDB() {
 			Model:     g.Model,
 			IsAnomaly: false, //新增默认健康
 		})
-		logger.L.Infof("仿真捕获新增 GPU: %s", g.UUID)
+		logger.L.Infof("捕获新增 GPU: %s", g.UUID)
 	}
 }
 

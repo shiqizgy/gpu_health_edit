@@ -18,7 +18,7 @@ type StrategyService struct {
 	mRepo *repository.MetricRepo
 
 	// 缓存：code -> 编译后策略 + 版本
-	cache   sync.Map // map[string]*cachedStrategy
+	cache sync.Map // map[string]*cachedStrategy
 }
 
 type cachedStrategy struct {
@@ -104,4 +104,13 @@ func (s *StrategyService) GetCompiledDefault() (*scoring.CompiledStrategy, error
 		return nil, err
 	}
 	return s.GetCompiled(def.Code)
+}
+
+// GetCompiledByID 按策略 ID 取编译结果(带缓存)。scorer 解析绑定关系后用。
+func (s *StrategyService) GetCompiledByID(id uint64) (*scoring.CompiledStrategy, error) {
+	strategy, err := s.repo.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetCompiled(strategy.Code)
 }

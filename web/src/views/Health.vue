@@ -47,6 +47,7 @@
       <n-tab-pane name="strategy" tab="评分策略">
         <div class="toolbar">
           <span class="hint">不同任务可配置不同的指标权重与维度权重，评分时按集群/卡选择对应策略</span>
+          <n-button type="primary" size="small" @click="openCreateStrategy">+ 新建策略</n-button>
         </div>
         <div class="panel">
           <div class="panel-title">策略列表</div>
@@ -128,6 +129,33 @@
       </n-tab-pane>
     </n-tabs>
   </div>
+
+  <n-modal v-model:show="showCreateStrategy" preset="card" title="新建评分策略" style="width: 560px">
+    <n-form label-placement="left" label-width="110">
+      <n-form-item label="策略代码"><n-input v-model:value="newStrategy.code" placeholder="如 inference_loose" /></n-form-item>
+      <n-form-item label="策略名称"><n-input v-model:value="newStrategy.name" placeholder="如 推理宽松" /></n-form-item>
+      <n-form-item label="说明"><n-input v-model:value="newStrategy.description" /></n-form-item>
+      <n-form-item label="维度权重JSON"><n-input v-model:value="newStrategy.dimension_weights" type="textarea" :autosize="{minRows:2}" class="mono" /></n-form-item>
+    </n-form>
+    <template #footer>
+      <n-space justify="end">
+        <n-button @click="showCreateStrategy = false">取消</n-button>
+        <n-button type="primary" @click="doCreateStrategy">创建</n-button>
+      </n-space>
+    </template>
+  </n-modal>
+
+  <n-modal v-model:show="showAssign" preset="card" title="为集群分配评分策略" style="width: 480px">
+    <div style="margin-bottom:12px;color:var(--text-1)">集群:{{ assignTarget?.cluster_name }}</div>
+    <n-select v-model:value="assignStrategyId" :options="strategyOptions" placeholder="选择策略(留空=恢复默认)" clearable />
+    <template #footer>
+      <n-space justify="end">
+        <n-button @click="showAssign = false">取消</n-button>
+        <n-button type="primary" @click="doAssign">确定</n-button>
+      </n-space>
+    </template>
+  </n-modal>
+
 </template>
 
 <script setup lang="ts">
@@ -170,7 +198,8 @@ const clusterCols = [
   { title: "亚健康", key: "sub_healthy_cnt", width: 70, render: (r: any) => h("span", { style: "color:#84cc16" }, r.sub_healthy_cnt) },
   { title: "警告", key: "warning_cnt", width: 70, render: (r: any) => h("span", { style: "color:#eab308" }, r.warning_cnt) },
   { title: "严重", key: "critical_cnt", width: 70, render: (r: any) => h("span", { style: "color:#f97316" }, r.critical_cnt) },
-  { title: "故障", key: "failed_cnt", width: 70, render: (r: any) => h("span", { style: "color:#ef4444" }, r.failed_cnt) }
+  { title: "故障", key: "failed_cnt", width: 70, render: (r: any) => h("span", { style: "color:#ef4444" }, r.failed_cnt) },
+  { title: "评分策略", key: "strategy", width: 160,render: (r: any) => h(NButton, { size: "tiny", onClick: (e: any) => { e.stopPropagation(); openAssign(r); } },() => "分配策略") }
 ];
 
 function clusterRowProps(row: any) {
@@ -216,6 +245,29 @@ const dimensionWeights = ref({
   performance: 0.20,
   environment: 0.10
 });
+
+//集群分配
+const showAssign = ref(false);
+const assignTarget = ref<any>(null);
+const assignStrategyId = ref<number | null>(null);
+const strategyOptions = computed(() =>
+  strategies.value.map((s: any) => ({ label: `${s.name} (${s.code})`, value: s.id }))
+);
+
+function openAssign(cluster: any) {
+  assignTarget.value = cluster;
+  assignStrategyId.value = null;
+  showAssign.value = true;
+}
+async function doAssign() {
+  try {
+    await api.bindClusterStrategy(assignTarget.value.cluster_id, assignStrategyId.value);
+    message.success("已分配,将在下一个评分周期(≤1分钟)生效");
+    showAssign.value = false;
+  } catch {
+    message.error("分配失败");
+  }
+}
 
 // 计算权重总和
 const weightTotal = computed(() => {
@@ -349,8 +401,53 @@ async function saveStrategy() {
   }
 }
 
-
 onMounted(() => { loadClusters(); loadStrategies(); });
+
+const showCreateStrategy = ref(false);
+const newStrategy = ref<any>({
+  code: "", name: "", description: "",
+  dimension_weights: '{"hardware":0.45,"stability":0.25,"performance":0.20,"environment":0.10}',
+  rules: []
+});
+
+function openCreateStrategy() {
+  newStrategy.value = {
+    code: "", name: "", description: "",
+    dimension_weights: '{"hardware":0.45,"stability":0.25,"performance":0.20,"environment":0.10}',
+    rules: []
+  };
+  showCreateStrategy.value = true;
+}
+
+async function doCreateStrategy() {
+  try {
+    JSON.parse(newStrategy.value.dimension_weights); // 校验
+    if (!newStrategy.value.code) { message.warning("策略代码必填"); return; }
+    await api.createStrategy(newStrategy.value);
+    message.success("策略已创建。提示:新策略暂无指标规则,请在列表点'编辑权重'补全各指标权重");
+    showCreateStrategy.value = false;
+    await loadStrategies();
+  } catch {
+    message.error("创建失败:维度权重需为合法 JSON");
+  }
+}
+
+async function deleteStrategy(row: any) {
+  dialog.warning({
+    title: "确认删除", content: `删除策略「${row.name}」?`,
+    positiveText: "删除", negativeText: "取消",
+    onPositiveClick: async () => {
+      try {
+        await api.deleteStrategy(row.id);
+        message.success("已删除");
+        await loadStrategies();
+      } catch (e: any) {
+        message.error(e?.response?.data?.msg || "删除失败");
+      }
+    }
+  });
+}
+
 </script>
 
 <style scoped>

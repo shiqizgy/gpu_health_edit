@@ -30,7 +30,7 @@ func Setup(db *gorm.DB, rc *redisclient.Client) *gin.Engine {
 	// 实例化 handler
 	dashboardH := handler.NewDashboardHandler(healthRepo)
 	metricH := handler.NewMetricHandler(metricRepo)
-	strategyH := handler.NewStrategyHandler(strategyRepo)
+	strategyH := handler.NewStrategyHandler(strategyRepo, topoRepo)
 	topoH := handler.NewTopologyHandler(topoRepo)
 	healthH := handler.NewHealthHandler(healthRepo)
 	faultH := handler.NewFaultHandler(faultRepo, rc)
@@ -53,12 +53,14 @@ func Setup(db *gorm.DB, rc *redisclient.Client) *gin.Engine {
 		api.PUT("/strategies/:id", strategyH.UpdateMeta)
 		api.PUT("/strategies/:id/rules", strategyH.UpdateRules)
 		api.DELETE("/strategies/:id", strategyH.Delete)
+		api.PUT("/clusters/:id/strategy", strategyH.BindClusterStrategy)
+		api.PUT("/gpus/:uuid/strategy", strategyH.BindGPUStrategy)
 
 		// 集群拓扑（三级树）
 		api.GET("/topology/clusters", topoH.Clusters)
 		api.GET("/topology/clusters/:clusterId/nodes", topoH.Nodes)
 		api.GET("/topology/nodes/:nodeId/gpus", topoH.GPUs)
-		api.POST("/topology/gpus", topoH.AddGPU)                  // 扩容
+		api.POST("/topology/gpus", topoH.AddGPU)                   // 扩容
 		api.PUT("/topology/gpus/:uuid/status", topoH.SetGPUStatus) // 缩容
 
 		// 健康值
