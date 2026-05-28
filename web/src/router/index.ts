@@ -11,6 +11,7 @@ const routes = [
   { path: "/fault/knowledge", name: "fault-knowledge", component: () => import("@/views/FaultKnowledge.vue") },
   { path: "/fault/predict", name: "fault-predict", component: () => import("@/views/FaultPredict.vue") },
   { path: "/fault/rca", name: "fault-rca", component: () => import("@/views/FaultRCA.vue") },
+  { path: "/fault/assistant", name: "fault-assistant", component: () => import("@/views/Assistant.vue") },
   // 演示工具
   { path: "/inject", name: "inject", component: () => import("@/views/FaultInject.vue") }
 ];

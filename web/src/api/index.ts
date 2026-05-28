@@ -2,6 +2,60 @@ import axios from "axios";
 
 const http = axios.create({ baseURL: "/api/v1", timeout: 15000 });
 
+// AI 助手 SSE 流式对话(axios 不支持流式,用原生 fetch + ReadableStream)
+// onEvent(eventType, data) 会在每收到一个 SSE 事件时被调用
+export async function assistantChatStream(
+    payload: { uuid: string; message: string; history: any[] },
+    onEvent: (eventType: string, data: string) => void,
+    signal?: AbortSignal
+): Promise<void> {
+  const resp = await fetch("/api/v1/assistant/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal
+  });
+
+  if (!resp.ok || !resp.body) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`助手接口错误 ${resp.status}: ${text}`);
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE 事件之间以空行(\n\n)分隔,逐个解析
+    let sepIndex: number;
+    while ((sepIndex = buffer.indexOf("\n\n")) !== -1) {
+      const rawEvent = buffer.slice(0, sepIndex);
+      buffer = buffer.slice(sepIndex + 2);
+      parseSSEBlock(rawEvent, onEvent);
+    }
+  }
+  // 处理残留
+  if (buffer.trim()) parseSSEBlock(buffer, onEvent);
+}
+
+// 解析单个 SSE 块: "event: xxx\ndata: yyy"
+function parseSSEBlock(block: string, onEvent: (t: string, d: string) => void) {
+  let eventType = "message";
+  const dataLines: string[] = [];
+  for (const line of block.split("\n")) {
+    if (line.startsWith("event:")) {
+      eventType = line.slice(6).trim();
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).replace(/^ /, "")); // 去掉 "data:" 后的一个空格
+    }
+  }
+  onEvent(eventType, dataLines.join("\n"));
+}
+
 http.interceptors.response.use(
   (r) => {
     // 后端统一响应是 { code, msg, data }，这里直接返回业务 data

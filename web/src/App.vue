@@ -53,6 +53,7 @@ const titleMap: Record<string, string> = {
   "fault-knowledge": "故障知识图谱",
   "fault-predict": "故障预测",
   "fault-rca": "故障根因分析",
+  "fault-assistant": "AI 故障分析助手",
   inject: "故障注入"
 };
 const currentTitle = computed(() => titleMap[activeKey.value] || "");
@@ -72,7 +73,8 @@ const menuOptions = [
     children: [
       { label: "故障知识图谱", key: "fault-knowledge" },
       { label: "故障预测", key: "fault-predict" },
-      { label: "故障根因分析", key: "fault-rca" }
+      { label: "故障根因分析", key: "fault-rca" },
+      { label: "AI 故障分析助手", key: "fault-assistant" }
     ]
   },
   { label: "故障注入(演示)", key: "inject" }
