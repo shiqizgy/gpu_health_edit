@@ -40,7 +40,36 @@ func (r *StrategyRepo) GetDefault() (*model.ScoringStrategy, error) {
 
 // Create 新建策略（含规则），用事务保证一致性
 func (r *StrategyRepo) Create(s *model.ScoringStrategy) error {
-	return r.db.Create(s).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		// 若 rules 为空,自动复制默认策略的规则作为起点
+		if len(s.Rules) == 0 {
+			var defaultStrategy model.ScoringStrategy
+			if err := tx.Preload("Rules").Where("is_default = ?", true).First(&defaultStrategy).Error; err == nil {
+				for _, r := range defaultStrategy.Rules {
+					//确保curve_params不为空字符串
+					if r.CurveParams == "" {
+						r.CurveParams = "null" // 或者使用sql.NullString
+					}
+					s.Rules = append(s.Rules, model.StrategyMetricRule{
+						MetricKey:     r.MetricKey,
+						Weight:        r.Weight,
+						CurveType:     r.CurveType,
+						CurveParams:   r.CurveParams,
+						IsVeto:        r.IsVeto,
+						VetoThreshold: r.VetoThreshold,
+					})
+				}
+			}
+		} else {
+			//处理传入的规则
+			for i := range s.Rules {
+				if s.Rules[i].CurveParams == "" {
+					s.Rules[i].CurveParams = "null" // 或者使用sql.NullString
+				}
+			}
+		}
+		return tx.Create(s).Error
+	})
 }
 
 // UpdateMeta 更新策略基本信息 + 维度权重，并把 version+1 触发评分服务热加载

@@ -130,17 +130,78 @@
     </n-tabs>
   </div>
 
-  <n-modal v-model:show="showCreateStrategy" preset="card" title="新建评分策略" style="width: 560px">
+  <n-modal v-model:show="showCreateStrategy" preset="card" title="新建评分策略" style="width: 760px">
     <n-form label-placement="left" label-width="110">
-      <n-form-item label="策略代码"><n-input v-model:value="newStrategy.code" placeholder="如 inference_loose" /></n-form-item>
-      <n-form-item label="策略名称"><n-input v-model:value="newStrategy.name" placeholder="如 推理宽松" /></n-form-item>
-      <n-form-item label="说明"><n-input v-model:value="newStrategy.description" /></n-form-item>
-      <n-form-item label="维度权重JSON"><n-input v-model:value="newStrategy.dimension_weights" type="textarea" :autosize="{minRows:2}" class="mono" /></n-form-item>
+      <!-- 基本信息 -->
+      <n-grid :cols="2" :x-gap="16">
+        <n-gi>
+          <n-form-item label="策略代码">
+            <n-input v-model:value="newStrategy.code" placeholder="如 inference_loose" />
+          </n-form-item>
+        </n-gi>
+        <n-gi>
+          <n-form-item label="策略名称">
+            <n-input v-model:value="newStrategy.name" placeholder="如 推理宽松" />
+          </n-form-item>
+        </n-gi>
+      </n-grid>
+      <n-form-item label="说明">
+        <n-input v-model:value="newStrategy.description" />
+      </n-form-item>
+
+      <!-- 维度权重(四个输入框) -->
+      <div class="section-title">
+        维度权重 <span :class="weightSumOK ? 'sum-ok' : 'sum-bad'">(当前合计: {{ weightSum }},需为 1.0)</span>
+      </div>
+      <n-grid :cols="4" :x-gap="12" style="margin-bottom: 18px">
+        <n-gi>
+          <div class="weight-label">硬件健康</div>
+          <n-input-number v-model:value="newStrategy.weight_hardware"
+            :min="0" :max="1" :step="0.05" :precision="2" style="width: 100%" />
+        </n-gi>
+        <n-gi>
+          <div class="weight-label">运行稳定性</div>
+          <n-input-number v-model:value="newStrategy.weight_stability"
+            :min="0" :max="1" :step="0.05" :precision="2" style="width: 100%" />
+        </n-gi>
+        <n-gi>
+          <div class="weight-label">性能表现</div>
+          <n-input-number v-model:value="newStrategy.weight_performance"
+            :min="0" :max="1" :step="0.05" :precision="2" style="width: 100%" />
+        </n-gi>
+        <n-gi>
+          <div class="weight-label">运行环境</div>
+          <n-input-number v-model:value="newStrategy.weight_environment"
+            :min="0" :max="1" :step="0.05" :precision="2" style="width: 100%" />
+        </n-gi>
+      </n-grid>
+
+      <!-- 参与计算的指标(按维度分组,可勾选,可调权重) -->
+      <div class="section-title">参与计算的指标 (默认已加载默认策略的规则,可勾选/调权重)</div>
+      <div class="metric-groups">
+        <div v-for="(rules, dim) in groupedRules" :key="dim" class="metric-group">
+          <div class="group-title">{{ dimNameMap[dim] }} ({{ rules.filter((r: any) => r.enabled).length }}/{{ rules.length }})</div>
+          <div v-for="r in rules" :key="r.metric_key" class="metric-row">
+            <n-checkbox
+              :checked="r.enabled"
+              @update:checked="(val) => onRuleEnabledChange(r.metric_key, val)">
+              <span class="metric-name">{{ r._displayName }}</span>
+              <span class="metric-key">{{ r.metric_key }}</span>
+            </n-checkbox>
+            <n-input-number
+               :value="r.weight"
+               @update:value="(val) => onRuleWeightChange(r.metric_key, val)"
+               :min="0" :step="0.5" :precision="2" size="small"
+               style="width: 100px" :disabled="!r.enabled" />
+            <span class="curve-tag">{{ r.curve_type }}<span v-if="r.is_veto" class="veto-tag">否决</span></span>
+          </div>
+        </div>
+      </div>
     </n-form>
     <template #footer>
       <n-space justify="end">
         <n-button @click="showCreateStrategy = false">取消</n-button>
-        <n-button type="primary" @click="doCreateStrategy">创建</n-button>
+        <n-button type="primary" :disabled="!weightSumOK" @click="doCreateStrategy">创建</n-button>
       </n-space>
     </template>
   </n-modal>
@@ -405,32 +466,192 @@ onMounted(() => { loadClusters(); loadStrategies(); });
 
 const showCreateStrategy = ref(false);
 const newStrategy = ref<any>({
-  code: "", name: "", description: "",
-  dimension_weights: '{"hardware":0.45,"stability":0.25,"performance":0.20,"environment":0.10}',
-  rules: []
+  code: "",
+  name: "",
+  description: "",
+  // 维度权重用四个数字字段
+  weight_hardware: 0.45,
+  weight_stability: 0.25,
+  weight_performance: 0.20,
+  weight_environment: 0.10,
+  // 指标规则列表(从默认策略加载并允许编辑)
+  metricRules: [] as any[]
 });
+// 所有指标(按维度分组用)
+const allMetrics = ref<any[]>([]);
+// 维度的中文名
+const dimNameMap: Record<string, string> = {
+  hardware: "硬件健康",
+  stability: "运行稳定性",
+  performance: "性能表现",
+  environment: "运行环境"
+};
 
-function openCreateStrategy() {
+
+async function openCreateStrategy() {
+  // 加载所有指标定义(用于显示中文名/单位/维度)
+  if (allMetrics.value.length === 0) {
+      try {
+        allMetrics.value = await api.metrics();
+        console.log('成功加载指标定义:', allMetrics.value.length, '个');
+      } catch (error) {
+        console.error('加载指标定义失败:', error);
+        message.error('无法加载指标定义，请刷新页面重试');
+        return;
+      }
+    }
+  // 加载默认策略的规则作为起点
+  let defaultRules: any[] = [];
+  try {
+    const defStrategy = strategies.value.find((s: any) => s.is_default);
+    if (defStrategy) {
+      const full = await api.strategy(defStrategy.id);
+      defaultRules = (full.rules || []).map((r: any) => ({
+        metric_key: r.metric_key,
+        weight: r.weight,
+        curve_type: r.curve_type,
+        curve_params: r.curve_params,
+        is_veto: r.is_veto,
+        veto_threshold: r.veto_threshold,
+        enabled: true  // 默认全部启用
+      }));
+    }
+  } catch (e) { /* 忽略,允许空起点 */ }
+
   newStrategy.value = {
-    code: "", name: "", description: "",
-    dimension_weights: '{"hardware":0.45,"stability":0.25,"performance":0.20,"environment":0.10}',
-    rules: []
+    code: "",
+    name: "",
+    description: "",
+    weight_hardware: 0.45,
+    weight_stability: 0.25,
+    weight_performance: 0.20,
+    weight_environment: 0.10,
+    metricRules: defaultRules
   };
   showCreateStrategy.value = true;
 }
 
-async function doCreateStrategy() {
-  try {
-    JSON.parse(newStrategy.value.dimension_weights); // 校验
-    if (!newStrategy.value.code) { message.warning("策略代码必填"); return; }
-    await api.createStrategy(newStrategy.value);
-    message.success("策略已创建。提示:新策略暂无指标规则,请在列表点'编辑权重'补全各指标权重");
-    showCreateStrategy.value = false;
-    await loadStrategies();
-  } catch {
-    message.error("创建失败:维度权重需为合法 JSON");
+// 添加事件处理方法
+function onRuleEnabledChange(ruleKey: string, enabled: boolean) {
+  const ruleIndex = newStrategy.value.metricRules.findIndex(r => r.metric_key === ruleKey);
+  if (ruleIndex !== -1) {
+    // 直接修改源数据
+    newStrategy.value.metricRules[ruleIndex].enabled = enabled;
+    // 强制触发响应式更新
+    newStrategy.value.metricRules = [...newStrategy.value.metricRules];
   }
 }
+
+function onRuleWeightChange(ruleKey: string, weight: number) {
+  const ruleIndex = newStrategy.value.metricRules.findIndex(r => r.metric_key === ruleKey);
+  if (ruleIndex !== -1) {
+    // 直接修改源数据
+    newStrategy.value.metricRules[ruleIndex].weight = weight;
+    // 强制触发响应式更新
+    newStrategy.value.metricRules = [...newStrategy.value.metricRules];
+  }
+}
+
+// 维度权重和(用 computed 实时显示)
+const weightSum = computed(() => {
+  const w = newStrategy.value;
+  return Number(((w.weight_hardware || 0) + (w.weight_stability || 0)
+    + (w.weight_performance || 0) + (w.weight_environment || 0)).toFixed(4));
+});
+const weightSumOK = computed(() => Math.abs(weightSum.value - 1) < 0.001);
+
+async function doCreateStrategy() {
+  const f = newStrategy.value;
+  if (!f.code) { message.warning("策略代码必填"); return; }
+  if (!f.name) { message.warning("策略名称必填"); return; }
+  if (!weightSumOK.value) {
+    message.error(`四个维度权重之和必须为 1.0,当前为 ${weightSum.value}`);
+    return;
+  }
+  // 至少要勾一个指标
+  const selected = f.metricRules.filter((r: any) => r.enabled);
+  if (selected.length === 0) {
+    message.warning("请至少选择一个参与计算的指标");
+    return;
+  }
+
+  // 组装维度权重 JSON
+  const dimWeights = JSON.stringify({
+    hardware: f.weight_hardware,
+    stability: f.weight_stability,
+    performance: f.weight_performance,
+    environment: f.weight_environment
+  });
+
+  // 组装规则(剥掉 enabled 字段)
+  const rules = selected.map((r: any) => ({
+    metric_key: r.metric_key,
+    weight: r.weight,
+    curve_type: r.curve_type,
+    curve_params: r.curve_params,
+    is_veto: r.is_veto,
+    veto_threshold: r.veto_threshold
+  }));
+
+  try {
+    await api.createStrategy({
+      code: f.code,
+      name: f.name,
+      description: f.description,
+      dimension_weights: dimWeights,
+      rules: rules
+    });
+    message.success(`策略已创建,包含 ${rules.length} 个指标规则`);
+    showCreateStrategy.value = false;
+    await loadStrategies();
+  } catch (e: any) {
+    message.error(e?.response?.data?.msg || "创建失败");
+  }
+}
+
+const groupedRules = computed(() => {
+  const groups: Record<string, any[]> = {
+    hardware: [], stability: [], performance: [], environment: []
+  };
+
+  //确保数据存在
+  if (!allMetrics.value || allMetrics.value.length === 0) {
+    console.warn('指标定义未加载');
+    return groups;
+  }
+
+  if (!newStrategy.value || !newStrategy.value.metricRules) {
+      console.warn('策略规则未初始化');
+      return groups;
+  }
+
+  // 用 allMetrics 拿到每个指标的维度和显示名
+  const metricMeta: Record<string, any> = {};
+  for (const m of allMetrics.value) {
+    metricMeta[m.metric_key] = m;
+  }
+
+  for (const r of newStrategy.value.metricRules) {
+    const meta = metricMeta[r.metric_key];
+    if (!meta) {
+      console.warn(`找不到指标 ${r.metric_key} 的元数据`);
+      continue;
+    }
+
+    const dim = meta.dimension;
+    if (groups[dim]) {
+      // 创建深拷贝，确保响应式追踪
+      const ruleCopy = {
+        ...r,
+        _displayName: meta.display_name || r.metric_key,
+        _unit: meta.unit || ''
+      };
+      groups[dim].push(ruleCopy);
+    }
+  }
+
+  return groups;
+});
 
 async function deleteStrategy(row: any) {
   dialog.warning({
@@ -518,6 +739,57 @@ async function deleteStrategy(row: any) {
   font-size: 11px;
   color: var(--text-2);
   margin-top: 4px;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin: 16px 0 10px;
+  letter-spacing: 0.04em;
+}
+
+.sum-ok { color: #22c55e; font-weight: 400; font-size: 12px; }
+
+.sum-bad { color: #ef4444; font-weight: 400; font-size: 12px; }
+
+.weight-label { font-size: 12px; color: var(--text-2); margin-bottom: 6px; }
+
+.metric-groups {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.metric-group { margin-bottom: 14px; }
+
+.group-title {
+  font-size: 12px; color: var(--accent); font-weight: 600;
+  padding: 6px 0; border-bottom: 1px solid var(--bg-3); margin-bottom: 6px;
+}
+
+.metric-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 4px 0;
+}
+
+.metric-row .metric-name { font-size: 13px; margin-left: 4px; }
+
+.metric-row .metric-key {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-2); margin-left: 6px;
+}
+
+.curve-tag {
+  font-size: 11px; color: var(--text-2); margin-left: auto;
+  font-family: var(--font-mono);
+}
+
+.veto-tag {
+  background: rgba(239,68,68,0.15); color: #ef4444;
+  padding: 1px 6px; border-radius: 3px; margin-left: 6px;
 }
 
 </style>
