@@ -5,7 +5,7 @@ const http = axios.create({ baseURL: "/api/v1", timeout: 15000 });
 // AI 助手 SSE 流式对话(axios 不支持流式,用原生 fetch + ReadableStream)
 // onEvent(eventType, data) 会在每收到一个 SSE 事件时被调用
 export async function assistantChatStream(
-    payload: { uuid: string; message: string; history: any[] },
+    payload: { conversation_id: number; uuid: string; message: string },
     onEvent: (eventType: string, data: string) => void,
     signal?: AbortSignal
 ): Promise<void> {
@@ -117,5 +117,12 @@ export const api = {
 
   // 故障注入（演示）
   injectFault: (uuid: string, mode: string) => http.post<any, any>("/faults/inject", { uuid, mode }),
-  listFaults: () => http.get<any, any>("/faults/inject")
+  listFaults: () => http.get<any, any>("/faults/inject"),
+
+  //AI助手会话
+  listConversations: () => http.get<any, any>("/assistant/conversations"),
+  createConversation: (data: any) => http.post<any, any>("/assistant/conversations", data),
+  getConversation: (id: number) => http.get<any, any>(`/assistant/conversations/${id}`),
+  updateConversation: (id: number, data: any) => http.put<any, any>(`/assistant/conversations/${id}`, data),
+  deleteConversation: (id: number) => http.delete<any, any>(`/assistant/conversations/${id}`),
 };

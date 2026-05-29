@@ -28,6 +28,10 @@ func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantCon
 	topoRepo := repository.NewTopologyRepo(db)
 	healthRepo := repository.NewHealthRepo(db)
 	faultRepo := repository.NewFaultRepo(db)
+	assistantRepo := repository.NewAssistantRepo(db)
+
+	//实例化 service
+	assistantSvc := assistant.NewService(assistantCfg, topoRepo, healthRepo, metricRepo, faultRepo, rc, assistantRepo)
 
 	// 实例化 handler
 	dashboardH := handler.NewDashboardHandler(healthRepo)
@@ -36,10 +40,7 @@ func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantCon
 	topoH := handler.NewTopologyHandler(topoRepo)
 	healthH := handler.NewHealthHandler(healthRepo)
 	faultH := handler.NewFaultHandler(faultRepo, rc)
-
-	// AI 助手(需要多个 repo + Redis + 配置)
-	assistantSvc := assistant.NewService(assistantCfg, topoRepo, healthRepo, metricRepo, faultRepo, rc)
-	assistantH := handler.NewAssistantHandler(assistantSvc)
+	assistantH := handler.NewAssistantHandler(assistantSvc, assistantRepo)
 
 	api := r.Group("/api/v1")
 	{
@@ -86,7 +87,11 @@ func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantCon
 
 		// AI 故障分析助手(SSE 流式)
 		api.POST("/assistant/chat", assistantH.Chat)
-
+		api.GET("/assistant/conversations", assistantH.ListConversations)
+		api.POST("/assistant/conversations", assistantH.CreateConversation)
+		api.GET("/assistant/conversations/:id", assistantH.GetConversation)
+		api.PUT("/assistant/conversations/:id", assistantH.UpdateConversation)
+		api.DELETE("/assistant/conversations/:id", assistantH.DeleteConversation)
 	}
 
 	return r
