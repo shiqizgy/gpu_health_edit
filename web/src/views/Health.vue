@@ -206,9 +206,22 @@
     </template>
   </n-modal>
 
-  <n-modal v-model:show="showAssign" preset="card" title="为集群分配评分策略" style="width: 480px">
-    <div style="margin-bottom:12px;color:var(--text-1)">集群:{{ assignTarget?.cluster_name }}</div>
-    <n-select v-model:value="assignStrategyId" :options="strategyOptions" placeholder="选择策略(留空=恢复默认)" clearable />
+  <n-modal v-model:show="showAssign" preset="card":title="assignType === 'cluster' ? '为集群分配评分策略' : '为单卡分配评分策略'" style="width: 480px">
+    <div style="margin-bottom: 12px; color: var(--text-1); font-size: 13px;">
+      <span v-if="assignType === 'cluster'">
+        目标集群: <strong>{{ assignTarget?.cluster_name }}</strong>
+      </span>
+      <span v-else>
+        目标 GPU: <strong class="mono">{{ assignTarget?.gpu_uuid }}</strong>
+      </span>
+    </div>
+    <n-select v-model:value="assignStrategyId"
+      :options="strategyOptions"
+      placeholder="选择策略(清空 = 恢复默认/解绑)"
+      clearable />
+    <div style="margin-top: 10px; font-size: 12px; color: var(--text-2)">
+      优先级:卡级 &gt; 集群级 &gt; 全局默认
+    </div>
     <template #footer>
       <n-space justify="end">
         <n-button @click="showAssign = false">取消</n-button>
@@ -260,7 +273,15 @@ const clusterCols = [
   { title: "警告", key: "warning_cnt", width: 70, render: (r: any) => h("span", { style: "color:#eab308" }, r.warning_cnt) },
   { title: "严重", key: "critical_cnt", width: 70, render: (r: any) => h("span", { style: "color:#f97316" }, r.critical_cnt) },
   { title: "故障", key: "failed_cnt", width: 70, render: (r: any) => h("span", { style: "color:#ef4444" }, r.failed_cnt) },
-  { title: "评分策略", key: "strategy", width: 160,render: (r: any) => h(NButton, { size: "tiny", onClick: (e: any) => { e.stopPropagation(); openAssign(r); } },() => "分配策略") }
+  { title: "当前评分策略", key: "bound_strategy_id", width: 140,
+    render: (r: any) => {
+      const sid = r.bound_strategy_id;
+      if (!sid) return h("span", { style: "color:var(--text-2);font-size:12px" }, "默认");
+      const s = strategies.value.find((x: any) => x.id === sid);
+      return h("span", { style: "font-size:12px;color:var(--accent)" }, s ? s.name : `策略#${sid}`);
+    }
+  },
+  { title: "评分策略", key: "strategy", width: 160,render: (r: any) => h(NButton, { size: "tiny", onClick: (e: any) => { e.stopPropagation(); openAssignCluster(r); } },() => "分配策略") }
 ];
 
 function clusterRowProps(row: any) {
@@ -280,7 +301,18 @@ const gpuCols = [
   { title: "否决", key: "veto", width: 80,
     render: (r: any) => r.veto ? h("span", { style: "color:#ef4444;font-weight:600" }, "VETO") : h("span", { style: "color:#5e6b78" }, "—") },
   { title: "否决原因", key: "veto_reason", width: 200,
-    render: (r: any) => h("span", { class: "mono", style: "font-size:12px" }, r.veto_reason || "") }
+    render: (r: any) => h("span", { class: "mono", style: "font-size:12px" }, r.veto_reason || "") },
+  { title: "评分策略", key: "strategy_id", width: 120,
+    render: (r: any) => {
+      const sid = r.strategy_id;
+      const s = strategies.value.find((x: any) => x.id === sid);
+      const label = s ? s.name : "默认";
+      return h("span", { style: "font-size:12px;color:var(--text-1)" }, label);
+    }
+  },
+  { title: "操作", key: "ops", width: 100,
+    render: (r: any) => h(NButton, { size: "tiny",
+      onClick: () => openAssignGPU(r) }, () => "分配策略") }
 ];
 
 async function loadClusters() {
@@ -309,24 +341,52 @@ const dimensionWeights = ref({
 
 //集群分配
 const showAssign = ref(false);
+const assignType = ref<"cluster" | "gpu">("cluster");
 const assignTarget = ref<any>(null);
 const assignStrategyId = ref<number | null>(null);
+
 const strategyOptions = computed(() =>
-  strategies.value.map((s: any) => ({ label: `${s.name} (${s.code})`, value: s.id }))
+  strategies.value.map((s: any) => ({
+    label: `${s.name} (${s.code})${s.is_default ? ' [默认]' : ''}`,
+    value: s.id
+  }))
 );
 
-function openAssign(cluster: any) {
+function openAssignCluster(cluster: any) {
+  assignType.value = "cluster";
   assignTarget.value = cluster;
-  assignStrategyId.value = null;
+  // 显示当前已绑的策略(如果有)
+  assignStrategyId.value = cluster.strategy_id || null;
   showAssign.value = true;
 }
+
+function openAssignGPU(gpu: any) {
+  assignType.value = "gpu";
+  assignTarget.value = gpu;
+  assignStrategyId.value = gpu.strategy_id || null;
+  showAssign.value = true;
+}
+
 async function doAssign() {
   try {
-    await api.bindClusterStrategy(assignTarget.value.cluster_id, assignStrategyId.value);
-    message.success("已分配,将在下一个评分周期(≤1分钟)生效");
+    if (assignType.value === "cluster") {
+      await api.bindClusterStrategy(assignTarget.value.cluster_id, assignStrategyId.value);
+    } else {
+      // 单卡绑定:用 gpu_uuid
+      await api.bindGPUStrategy(assignTarget.value.gpu_uuid, assignStrategyId.value);
+    }
+    message.success(assignStrategyId.value
+      ? "已分配,下个评分周期(≤1分钟)生效"
+      : "已解绑,将恢复默认策略");
     showAssign.value = false;
-  } catch {
-    message.error("分配失败");
+    // 刷新数据
+    if (assignType.value === "cluster") {
+      await loadClusters();
+    } else {
+      await loadGPUs();
+    }
+  } catch (e: any) {
+    message.error(e?.response?.data?.msg || "操作失败");
   }
 }
 

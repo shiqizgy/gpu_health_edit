@@ -39,13 +39,22 @@ func (r *HealthRepo) GetSnapshot(uuid string) (*model.GPUHealthSnapshot, error) 
 	return &s, err
 }
 
+type SnapshotWithBinding struct {
+	model.GPUHealthSnapshot
+	BoundStrategyID *uint64 `gorm:"column:bound_strategy_id" json:"bound_strategy_id"`
+}
+
 // ListSnapshotsByCluster 列集群内单卡快照，按分降序（坏卡置顶），分页
-func (r *HealthRepo) ListSnapshotsByCluster(clusterID uint64, limit, offset int) ([]model.GPUHealthSnapshot, int64, error) {
-	var out []model.GPUHealthSnapshot
+func (r *HealthRepo) ListSnapshotsByCluster(clusterID uint64, limit, offset int) ([]SnapshotWithBinding, int64, error) {
+	var out []SnapshotWithBinding
 	var total int64
 	r.db.Model(&model.GPUHealthSnapshot{}).Where("cluster_id = ?", clusterID).Count(&total)
-	err := r.db.Where("cluster_id = ?", clusterID).
-		Order("score ASC").Limit(limit).Offset(offset).Find(&out).Error
+	err := r.db.Table("gpu_health_snapshot AS s").
+		Select("s.*, g.strategy_id AS bound_strategy_id").
+		Joins("LEFT JOIN gpu_card g ON g.uuid = s.gpu_uuid").
+		Where("s.cluster_id = ?", clusterID).
+		Order("s.score ASC").Limit(limit).Offset(offset).
+		Scan(&out).Error
 	return out, total, err
 }
 
