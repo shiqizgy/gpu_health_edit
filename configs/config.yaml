@@ -28,7 +28,7 @@ simulator:
 assistant:
   enabled: true              # 开启自动故障修复
   base_url: "https://api.deepseek.com/v1"
-  api_key: "sk-3e42194e16e5472aa118927e60355c6c"
+  api_key: "sk-"
   model: "deepseek-chat"
   timeout_sec: 60
   max_history: 10            # 最多保留 10 条对话历史
