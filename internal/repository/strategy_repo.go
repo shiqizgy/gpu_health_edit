@@ -114,3 +114,21 @@ func (r *StrategyRepo) Delete(id uint64) error {
 		return tx.Delete(&model.ScoringStrategy{}, id).Error
 	})
 }
+
+// BumpVersionByMetricKey 将所有包含指定指标的策略 version+1。
+// 指标维度变更后调用，让评分服务在下一轮自动热加载。
+
+func (r *StrategyRepo) BumpVersionByMetricKey(metricKey string) error {
+	// 找出所有包含该指标的 strategy_id
+	var strategyIDs []uint64
+	err := r.db.Model(&model.StrategyMetricRule{}).
+		Where("metric_key = ?", metricKey).
+		Pluck("strategy_id", &strategyIDs).Error
+	if err != nil || len(strategyIDs) == 0 {
+		return err
+	}
+	// 批量 version+1
+	return r.db.Model(&model.ScoringStrategy{}).
+		Where("id IN ?", strategyIDs).
+		Update("version", gorm.Expr("version + 1")).Error
+}

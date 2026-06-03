@@ -35,7 +35,7 @@ func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantCon
 
 	// 实例化 handler
 	dashboardH := handler.NewDashboardHandler(healthRepo)
-	metricH := handler.NewMetricHandler(metricRepo)
+	metricH := handler.NewMetricHandler(metricRepo, strategyRepo)
 	strategyH := handler.NewStrategyHandler(strategyRepo, topoRepo)
 	topoH := handler.NewTopologyHandler(topoRepo)
 	healthH := handler.NewHealthHandler(healthRepo)
