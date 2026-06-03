@@ -19,7 +19,8 @@ func NewMetricHandler(repo *repository.MetricRepo) *MetricHandler {
 func (h *MetricHandler) List(c *gin.Context) {
 	dimension := c.Query("dimension")
 	deviceType := c.Query("device_type")
-	list, err := h.repo.List(dimension, deviceType)
+	healthKeyOnly := c.Query("is_health_key") == "true"
+	list, err := h.repo.List(dimension, deviceType, healthKeyOnly)
 	if err != nil {
 		response.ServerError(c, err.Error())
 		return

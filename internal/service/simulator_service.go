@@ -24,10 +24,12 @@ import (
 //   - 异常卡在初始化时随机选定 10%，也支持通过 Redis 故障注入临时改变某卡状态。
 //   - 写 Redis 用 Pipeline 批量，2000 卡一次往返完成。
 type SimulatorService struct {
-	cfg   config.SimulatorConfig
-	redis *redisclient.Client
-	topo  *repository.TopologyRepo
-	fleet []*simGPU
+	cfg          config.SimulatorConfig
+	redis        *redisclient.Client
+	topo         *repository.TopologyRepo
+	metricRepo   *repository.MetricRepo // 新增
+	fleet        []*simGPU
+	extraMetrics []model.MetricDefinition // 缓存DB里的自定义指标
 }
 
 // simGPU 单卡仿真状态
@@ -49,8 +51,8 @@ type simGPU struct {
 	resetCount            float64
 }
 
-func NewSimulatorService(cfg config.SimulatorConfig, rc *redisclient.Client, topo *repository.TopologyRepo) *SimulatorService {
-	return &SimulatorService{cfg: cfg, redis: rc, topo: topo}
+func NewSimulatorService(cfg config.SimulatorConfig, rc *redisclient.Client, topo *repository.TopologyRepo, metricRepo *repository.MetricRepo) *SimulatorService {
+	return &SimulatorService{cfg: cfg, redis: rc, topo: topo, metricRepo: metricRepo}
 }
 
 // InitFleet 初始化仿真机群：建立集群/节点/GPU 拓扑并写入数据库，同时构建内存仿真状态。
@@ -134,6 +136,9 @@ func (s *SimulatorService) GenerateOnce(ctx context.Context) error {
 	//每轮先从数据库同步在线GPU列表，捕获前端动态新增/下线的卡
 	s.syncFleetFromDB()
 
+	// ★ 刷新自定义指标列表（感知新增指标）
+	s.refreshExtraMetrics()
+
 	if len(s.fleet) == 0 {
 		logger.L.Warn("仿真机群为空，请先 InitFleet")
 		return nil
@@ -194,6 +199,35 @@ func (s *SimulatorService) syncFleetFromDB() {
 		})
 		logger.L.Infof("捕获新增 GPU: %s", g.UUID)
 	}
+}
+
+func (s *SimulatorService) refreshExtraMetrics() {
+	// 22个已知指标的key
+	knownKeys := map[string]bool{
+		"DCGM_FI_DEV_GPU_TEMP": true, "DCGM_FI_DEV_MEMORY_TEMP": true,
+		"DCGM_FI_DEV_POWER_USAGE": true, "DCGM_FI_DEV_THERMAL_VIOLATION": true,
+		"DCGM_FI_PROF_GR_ENGINE_ACTIVE": true, "DCGM_FI_PROF_SM_ACTIVE": true,
+		"DCGM_FI_PROF_PIPE_TENSOR_ACTIVE": true, "DCGM_FI_PROF_DRAM_ACTIVE": true,
+		"DCGM_FI_DEV_SM_CLOCK": true, "DCGM_FI_DEV_FB_USED_PERCENT": true,
+		"DCGM_FI_DEV_ECC_SBE_VOL_TOTAL": true, "DCGM_FI_DEV_ECC_DBE_VOL_TOTAL": true,
+		"DCGM_FI_DEV_CORRECTABLE_REMAPPED_ROWS": true, "DCGM_FI_DEV_UNCORRECTABLE_REMAPPED_ROWS": true,
+		"DCGM_FI_DEV_ROW_REMAP_FAILURE": true, "DCGM_FI_DEV_PCIE_REPLAY_COUNTER": true,
+		"DCGM_FI_DEV_NVLINK_CRC_FLIT_ERROR_COUNT_TOTAL": true, "DCGM_FI_DEV_NVLINK_RECOVERY_ERROR_COUNT_TOTAL": true,
+		"DCGM_FI_DEV_FABRIC_HEALTH_MASK": true, "DCGM_FI_DEV_XID_ERRORS": true,
+		"DCGM_FI_DEV_CLOCKS_EVENT_REASONS": true, "DCGM_FI_DEV_GPU_RESET_COUNT": true,
+	}
+	all, err := s.metricRepo.ListHealthKeys()
+	if err != nil {
+		logger.L.Warnf("刷新自定义指标失败: %v", err)
+		return
+	}
+	extra := make([]model.MetricDefinition, 0)
+	for _, m := range all {
+		if !knownKeys[m.MetricKey] {
+			extra = append(extra, m)
+		}
+	}
+	s.extraMetrics = extra
 }
 
 // sampleGPU 生成单卡一帧指标。mode 为手动注入的故障模式（空则按初始 IsAnomaly 决定）。
@@ -257,7 +291,7 @@ func (s *SimulatorService) sampleGPU(g *simGPU, mode string) map[string]float64 
 		g.uncorrectableRemap += 1
 	}
 
-	return map[string]float64{
+	m := map[string]float64{
 		// environment
 		"DCGM_FI_DEV_GPU_TEMP":          round1(temp),
 		"DCGM_FI_DEV_MEMORY_TEMP":       round1(memTemp),
@@ -285,6 +319,19 @@ func (s *SimulatorService) sampleGPU(g *simGPU, mode string) map[string]float64 
 		"DCGM_FI_DEV_CLOCKS_EVENT_REASONS": clockEvent,
 		"DCGM_FI_DEV_GPU_RESET_COUNT":      g.resetCount,
 	}
+	// 为数据库里额外定义的指标生成默认仿真值
+	for _, em := range s.extraMetrics {
+		if _, exists := m[em.MetricKey]; !exists {
+			// counter类型只增不减，gauge类型每次随机
+			if em.MetricType == "counter" {
+				m[em.MetricKey] = math.Round(rand.Float64() * 100)
+			} else {
+				m[em.MetricKey] = round3(clamp(normal(0.5, 0.2), 0, 1))
+			}
+		}
+	}
+
+	return m
 }
 
 // ---- 工具函数 ----

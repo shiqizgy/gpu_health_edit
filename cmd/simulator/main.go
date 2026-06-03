@@ -39,7 +39,8 @@ func main() {
 	defer rc.Close()
 
 	topoRepo := repository.NewTopologyRepo(db)
-	sim := service.NewSimulatorService(cfg.Simulator, rc, topoRepo)
+	metricRepo := repository.NewMetricRepo(db)
+	sim := service.NewSimulatorService(cfg.Simulator, rc, topoRepo, metricRepo)
 
 	ctx := context.Background()
 

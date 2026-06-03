@@ -118,7 +118,10 @@
                     </div>
                   </div>
                 </div>
-            <div class="rules-title">指标权重 / 曲线 / 一票否决</div>
+            <div class="rules-title" style="display:flex;align-items:center;justify-content:space-between;">
+              <span>指标权重 / 曲线 / 一票否决</span>
+              <n-button size="tiny" type="primary" ghost @click="showAddMetric = true">+ 添加指标</n-button>
+            </div>
             <n-data-table :columns="ruleCols" :data="editRules" :bordered="false" size="small" :max-height="380" />
             <n-space justify="end" style="margin-top: 16px">
               <n-button @click="editStrategy = null">取消</n-button>
@@ -230,6 +233,26 @@
     </template>
   </n-modal>
 
+  <!-- 添加指标到当前策略 -->
+  <n-modal v-model:show="showAddMetric" preset="card" title="添加指标到当前策略" style="width: 480px">
+    <div style="margin-bottom:12px;font-size:13px;color:var(--text-2)">
+      选择要加入本策略的指标，初始权重为 1.0，曲线为 none，可加入后再编辑。
+    </div>
+    <n-select
+      v-model:value="addMetricKey"
+      :options="addableMetricOptions"
+      filterable
+      placeholder="搜索或选择指标..."
+      style="margin-bottom:16px"
+    />
+    <template #footer>
+      <n-space justify="end">
+        <n-button @click="showAddMetric = false">取消</n-button>
+        <n-button type="primary" :disabled="!addMetricKey" @click="doAddMetric">添加</n-button>
+      </n-space>
+    </template>
+  </n-modal>
+
 </template>
 
 <script setup lang="ts">
@@ -330,6 +353,13 @@ const strategies = ref<any[]>([]);
 const editStrategy = ref<any>(null);
 const editRules = ref<any[]>([]);
 const dimWeightsText = ref("");
+
+// 从数据库拉取的全量指标（用于新增规则时选择）
+const allMetrics = ref<any[]>([]);
+
+// 新增指标弹窗
+const showAddMetric = ref(false);
+const addMetricKey = ref<string | null>(null);
 
 // 添加维度权重状态
 const dimensionWeights = ref({
@@ -439,16 +469,53 @@ const ruleCols = [
     render: (r: any) => h(NInputNumber, {
       value: r.veto_threshold, size: "tiny", min: 0,
       "onUpdate:value": (v: number) => (r.veto_threshold = v ?? 0)
-    }) }
+    }) },
+  { title: "移除", key: "remove", width: 70,
+      render: (r: any) => h(NButton, {
+        size: "tiny", type: "error", ghost: true,
+        onClick: () => { editRules.value = editRules.value.filter((x: any) => x.metric_key !== r.metric_key); }
+      }, () => "移除") }
+
 ];
 
 async function loadStrategies() {
   strategies.value = await api.strategies();
 }
+
+// 可添加的指标 = 全量指标里，当前策略还没有的那些
+const addableMetricOptions = computed(() => {
+  const existingKeys = new Set(editRules.value.map((r: any) => r.metric_key));
+  return allMetrics.value
+    .filter((m: any) => !existingKeys.has(m.metric_key))
+    .map((m: any) => ({
+      label: `${m.display_name}（${m.metric_key}）`,
+      value: m.metric_key,
+    }));
+});
+
+function doAddMetric() {
+  if (!addMetricKey.value) return;
+  const metric = allMetrics.value.find((m: any) => m.metric_key === addMetricKey.value);
+  if (!metric) return;
+  editRules.value.push({
+    id: 0,
+    strategy_id: editStrategy.value.id,
+    metric_key: metric.metric_key,
+    weight: 1.0,
+    curve_type: "none",
+    curve_params: null,
+    is_veto: false,
+    veto_threshold: 0,
+  });
+  addMetricKey.value = null;
+  showAddMetric.value = false;
+}
+
 async function openEditStrategy(r: any) {
   const full = await api.strategy(r.id);
   editStrategy.value = full;
   editRules.value = (full.rules || []).map((x: any) => ({ ...x }));
+
   // 解析维度权重到独立字段
   try {
     const parsedWeights = JSON.parse(full.dimension_weights);
@@ -459,7 +526,6 @@ async function openEditStrategy(r: any) {
       environment: parsedWeights.environment || 0
     };
   } catch (e) {
-    // 如果解析失败，使用默认值
     dimensionWeights.value = {
       hardware: 0.45,
       stability: 0.25,
@@ -467,6 +533,9 @@ async function openEditStrategy(r: any) {
       environment: 0.10
     };
   }
+
+  // 新增：拉取全量指标，用于"添加指标"下拉
+  allMetrics.value = await api.metrics({ is_health_key: true });
 }
 
 async function saveStrategy() {
@@ -537,8 +606,7 @@ const newStrategy = ref<any>({
   // 指标规则列表(从默认策略加载并允许编辑)
   metricRules: [] as any[]
 });
-// 所有指标(按维度分组用)
-const allMetrics = ref<any[]>([]);
+
 // 维度的中文名
 const dimNameMap: Record<string, string> = {
   hardware: "硬件健康",
@@ -546,7 +614,6 @@ const dimNameMap: Record<string, string> = {
   performance: "性能表现",
   environment: "运行环境"
 };
-
 
 async function openCreateStrategy() {
   // 加载所有指标定义(用于显示中文名/单位/维度)

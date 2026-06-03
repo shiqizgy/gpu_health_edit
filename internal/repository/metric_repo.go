@@ -10,13 +10,16 @@ type MetricRepo struct{ db *gorm.DB }
 
 func NewMetricRepo(db *gorm.DB) *MetricRepo { return &MetricRepo{db: db} }
 
-func (r *MetricRepo) List(dimension, deviceType string) ([]model.MetricDefinition, error) {
+func (r *MetricRepo) List(dimension, deviceType string, healthKeyOnly bool) ([]model.MetricDefinition, error) {
 	q := r.db.Model(&model.MetricDefinition{})
 	if dimension != "" {
 		q = q.Where("dimension = ?", dimension)
 	}
 	if deviceType != "" {
 		q = q.Where("device_type = ?", deviceType)
+	}
+	if healthKeyOnly {
+		q = q.Where("is_health_key = ?", true)
 	}
 	var out []model.MetricDefinition
 	err := q.Order("dimension, id").Find(&out).Error
