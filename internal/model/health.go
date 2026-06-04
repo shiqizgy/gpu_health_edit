@@ -35,18 +35,19 @@ func (GPUHealthSnapshot) TableName() string { return "gpu_health_snapshot" }
 //     避免每次请求去扫描几千上万行单卡快照。
 //     数据量很大的情况下，用预聚合把概览层的数据量自己控制住。
 type ClusterHealthSummary struct {
-	ID            uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	ClusterID     uint64    `gorm:"uniqueIndex;not null" json:"cluster_id"`
-	ClusterCode   string    `gorm:"type:varchar(64);not null" json:"cluster_code"`
-	ClusterName   string    `gorm:"type:varchar(128);not null" json:"cluster_name"`
-	TotalGPU      int       `json:"total_gpu"`                          // GPU 总数
-	AvgScore      float64   `gorm:"type:decimal(6,3)" json:"avg_score"` // 平均健康分
-	HealthyCnt    int       `json:"healthy_cnt"`                        // 各等级数量
-	SubHealthyCnt int       `json:"sub_healthy_cnt"`
-	WarningCnt    int       `json:"warning_cnt"`
-	CriticalCnt   int       `json:"critical_cnt"`
-	FailedCnt     int       `json:"failed_cnt"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID              uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	ClusterID       uint64    `gorm:"uniqueIndex;not null" json:"cluster_id"`
+	ClusterCode     string    `gorm:"type:varchar(64);not null" json:"cluster_code"`
+	ClusterName     string    `gorm:"type:varchar(128);not null" json:"cluster_name"`
+	TotalGPU        int       `json:"total_gpu"`                          // GPU 总数
+	AvgScore        float64   `gorm:"type:decimal(6,3)" json:"avg_score"` // 平均健康分
+	HealthyCnt      int       `json:"healthy_cnt"`                        // 各等级数量
+	SubHealthyCnt   int       `json:"sub_healthy_cnt"`
+	WarningCnt      int       `json:"warning_cnt"`
+	CriticalCnt     int       `json:"critical_cnt"`
+	FailedCnt       int       `json:"failed_cnt"`
+	BoundStrategyID *uint64   `gorm:"index" json:"bound_strategy_id"` // 当前评分策略ID
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 func (ClusterHealthSummary) TableName() string { return "cluster_health_summary" }

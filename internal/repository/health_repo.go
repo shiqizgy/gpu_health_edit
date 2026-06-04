@@ -101,7 +101,7 @@ func (r *HealthRepo) GlobalStats() (*GlobalStats, error) {
 func (r *HealthRepo) UpsertClusterSummary(s *model.ClusterHealthSummary) error {
 	return r.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "cluster_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"cluster_code", "cluster_name", "total_gpu", "avg_score", "healthy_cnt", "sub_healthy_cnt", "warning_cnt", "critical_cnt", "failed_cnt", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"cluster_code", "cluster_name", "total_gpu", "avg_score", "healthy_cnt", "sub_healthy_cnt", "warning_cnt", "critical_cnt", "failed_cnt", "bound_strategy_id", "updated_at"}),
 	}).Create(s).Error
 }
 
@@ -118,18 +118,20 @@ func (r *HealthRepo) ListClusterSummaries() ([]model.ClusterHealthSummary, error
 // 这是万卡场景下集群表格毫秒响应的关键。
 func (r *HealthRepo) RecomputeClusterSummaries() error {
 	type aggRow struct {
-		ClusterID     uint64
-		ClusterCode   string
-		ClusterName   string
-		TotalGPU      int
-		AvgScore      float64
-		HealthyCnt    int
-		SubHealthyCnt int
-		WarningCnt    int
-		CriticalCnt   int
-		FailedCnt     int
+		ClusterID       uint64
+		ClusterCode     string
+		ClusterName     string
+		TotalGPU        int
+		AvgScore        float64
+		HealthyCnt      int
+		SubHealthyCnt   int
+		WarningCnt      int
+		CriticalCnt     int
+		FailedCnt       int
+		BoundStrategyID *uint64
 	}
 	var rows []aggRow
+	// 修改SQL查询，添加策略ID信息
 	err := r.db.Table("gpu_health_snapshot AS s").
 		Select(`s.cluster_id,
 			c.code AS cluster_code, c.name AS cluster_name,
@@ -139,9 +141,10 @@ func (r *HealthRepo) RecomputeClusterSummaries() error {
 			SUM(CASE WHEN s.level='sub_healthy' THEN 1 ELSE 0 END) AS sub_healthy_cnt,
 			SUM(CASE WHEN s.level='warning' THEN 1 ELSE 0 END) AS warning_cnt,
 			SUM(CASE WHEN s.level='critical' THEN 1 ELSE 0 END) AS critical_cnt,
-			SUM(CASE WHEN s.level='failed' THEN 1 ELSE 0 END) AS failed_cnt`).
+			SUM(CASE WHEN s.level='failed' THEN 1 ELSE 0 END) AS failed_cnt,
+			c.strategy_id AS bound_strategy_id`).
 		Joins("JOIN cluster c ON c.id = s.cluster_id").
-		Group("s.cluster_id, c.code, c.name").
+		Group("s.cluster_id, c.code, c.name, c.strategy_id").
 		Scan(&rows).Error
 	if err != nil {
 		return err
@@ -150,11 +153,18 @@ func (r *HealthRepo) RecomputeClusterSummaries() error {
 	now := time.Now()
 	for _, x := range rows {
 		summary := &model.ClusterHealthSummary{
-			ClusterID: x.ClusterID, ClusterCode: x.ClusterCode, ClusterName: x.ClusterName,
-			TotalGPU: x.TotalGPU, AvgScore: x.AvgScore,
-			HealthyCnt: x.HealthyCnt, SubHealthyCnt: x.SubHealthyCnt,
-			WarningCnt: x.WarningCnt, CriticalCnt: x.CriticalCnt, FailedCnt: x.FailedCnt,
-			UpdatedAt: now,
+			ClusterID:       x.ClusterID,
+			ClusterCode:     x.ClusterCode,
+			ClusterName:     x.ClusterName,
+			TotalGPU:        x.TotalGPU,
+			AvgScore:        x.AvgScore,
+			HealthyCnt:      x.HealthyCnt,
+			SubHealthyCnt:   x.SubHealthyCnt,
+			WarningCnt:      x.WarningCnt,
+			CriticalCnt:     x.CriticalCnt,
+			FailedCnt:       x.FailedCnt,
+			BoundStrategyID: x.BoundStrategyID,
+			UpdatedAt:       now,
 		}
 		if err := r.UpsertClusterSummary(summary); err != nil {
 			return err

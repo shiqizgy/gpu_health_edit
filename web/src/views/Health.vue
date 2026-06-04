@@ -310,7 +310,17 @@ const clusterCols = [
 function clusterRowProps(row: any) {
   return {
     style: "cursor: pointer",
-    onClick: () => { activeCluster.value = row; page.value = 1; loadGPUs(); }
+    onClick: () => {
+          if (activeCluster.value && activeCluster.value.cluster_id === row.cluster_id) {
+            // 如果点击的是当前已展开的集群，则收起
+            activeCluster.value = null;
+          } else {
+            // 否则展开新的集群
+            activeCluster.value = row;
+            page.value = 1;
+            loadGPUs();
+          }
+        }
   };
 }
 
@@ -386,7 +396,7 @@ function openAssignCluster(cluster: any) {
   assignType.value = "cluster";
   assignTarget.value = cluster;
   // 显示当前已绑的策略(如果有)
-  assignStrategyId.value = cluster.strategy_id || null;
+  assignStrategyId.value = cluster.bound_strategy_id || null;
   showAssign.value = true;
 }
 
