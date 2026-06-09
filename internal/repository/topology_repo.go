@@ -10,8 +10,6 @@ type TopologyRepo struct{ db *gorm.DB }
 
 func NewTopologyRepo(db *gorm.DB) *TopologyRepo { return &TopologyRepo{db: db} }
 
-// ---- 集群 ----
-
 func (r *TopologyRepo) ListClusters() ([]model.Cluster, error) {
 	var out []model.Cluster
 	err := r.db.Order("id").Find(&out).Error
@@ -20,9 +18,7 @@ func (r *TopologyRepo) ListClusters() ([]model.Cluster, error) {
 
 func (r *TopologyRepo) CreateCluster(c *model.Cluster) error { return r.db.Create(c).Error }
 
-// ---- 节点 ----
 // ListNodesByCluster 列出某集群下的节点（拓扑展开子层用）
-
 func (r *TopologyRepo) ListNodesByCluster(clusterID uint64) ([]model.Node, error) {
 	var out []model.Node
 	err := r.db.Where("cluster_id = ?", clusterID).Order("id").Find(&out).Error
@@ -31,9 +27,7 @@ func (r *TopologyRepo) ListNodesByCluster(clusterID uint64) ([]model.Node, error
 
 func (r *TopologyRepo) CreateNode(n *model.Node) error { return r.db.Create(n).Error }
 
-// ---- GPU 卡 ----
 // ListGPUsByNode 列出某节点下的 GPU（拓扑叶子层）
-
 func (r *TopologyRepo) ListGPUsByNode(nodeID uint64) ([]model.GPUCard, error) {
 	var out []model.GPUCard
 	err := r.db.Where("node_id = ?", nodeID).Order("gpu_index").Find(&out).Error

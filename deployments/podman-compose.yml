@@ -41,6 +41,21 @@ services:
     volumes:
       - gpuhealth-redis-data:/data
 
+  clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:latest
+    container_name: gpuhealth-ck
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: "123456"
+    ulimits:
+      nofile: 262144
+    volumes:
+      - gpuhealth-ck-data:/var/lib/clickhouse
+
 volumes:
   gpuhealth-mysql-data:
   gpuhealth-redis-data:
+  gpuhealth-ck-data:

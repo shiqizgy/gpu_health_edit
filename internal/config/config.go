@@ -14,6 +14,7 @@ type Config struct {
 	Scorer    ScorerConfig    `yaml:"scorer"`
 	Simulator SimulatorConfig `yaml:"simulator"`
 	Assistant AssistantConfig `yaml:"assistant"`
+	CK        CKConfig        `yaml:"ck"`
 }
 
 type ServerConfig struct {
@@ -42,11 +43,12 @@ type ScorerConfig struct {
 
 // SimulatorConfig 仿真服务配置
 type SimulatorConfig struct {
-	Cron        string  `yaml:"cron"`         // 定时表达式，每分钟生成
-	GPUCount    int     `yaml:"gpu_count"`    // 仿真 GPU 数量
-	GPUPerNode  int     `yaml:"gpu_per_node"` // 每节点 GPU 数
-	AnomalyRate float64 `yaml:"anomaly_rate"` // 异常卡比例
-	MetricTTL   int     `yaml:"metric_ttl"`   // Redis 指标过期秒数
+	Clusters        []string `yaml:"clusters"` // = CK 的 source
+	NodesPerCluster int      `yaml:"nodes_per_cluster"`
+	GPUsPerNode     int      `yaml:"gpus_per_node"`
+	NodeGroup       string   `yaml:"node_group"` // = CK 的 gpu_node_group
+	FaultRate       float64  `yaml:"fault_rate"` // 每卡每轮起新故障概率
+	Cron            string   `yaml:"cron"`
 }
 
 type AssistantConfig struct {
@@ -56,6 +58,17 @@ type AssistantConfig struct {
 	Model      string `yaml:"model"`
 	TimeoutSec int    `yaml:"timeout_sec"`
 	MaxHistory int    `yaml:"max_history"`
+}
+
+type CKConfig struct {
+	Addr      string `yaml:"addr"` //host:9000 native 端口
+	Database  string `yaml:"database"`
+	Username  string `yaml:"username"`
+	Password  string `yaml:"password"`
+	Table     string `yaml:"table"`
+	Cron      string `yaml:"cron"`
+	WindowSec int    `yaml:"window_sec"` // 取最近多长时间的数据，单位秒
+	MetricTTL int    `yaml:"metric_ttl"` // 写Redis的TTL秒
 }
 
 func Load(path string) (*Config, error) {
