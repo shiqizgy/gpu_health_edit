@@ -3,6 +3,7 @@ package router
 import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/gpu-health/platform/internal/ckclient"
 	"github.com/gpu-health/platform/internal/config"
 	"github.com/gpu-health/platform/internal/handler"
 	"github.com/gpu-health/platform/internal/redisclient"
@@ -12,7 +13,7 @@ import (
 )
 
 // Setup 装配所有路由。handler 在这里实例化，依赖通过参数注入，结构清晰。
-func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantConfig) *gin.Engine {
+func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantConfig, ck *ckclient.Client, ckTable string) *gin.Engine {
 	r := gin.Default()
 
 	// CORS：允许前端 dev server
@@ -42,6 +43,8 @@ func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantCon
 	faultH := handler.NewFaultHandler(faultRepo, rc)
 	assistantH := handler.NewAssistantHandler(assistantSvc, assistantRepo)
 
+	seriesH := handler.NewMetricSeriesHandler(ck, ckTable, topoRepo, metricRepo)
+
 	api := r.Group("/api/v1")
 	{
 		// 健康大盘
@@ -69,11 +72,12 @@ func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantCon
 		api.GET("/topology/nodes/:nodeId/gpus", topoH.GPUs)
 		api.POST("/topology/gpus", topoH.AddGPU)                   // 扩容
 		api.PUT("/topology/gpus/:uuid/status", topoH.SetGPUStatus) // 缩容
+		api.GET("/health/gpus/:uuid", healthH.GPUDetail)
+		api.GET("/health/gpus/:uuid/metrics", seriesH.GPUMetrics) // ← 新增：下钻曲线
 
 		// 健康值
 		api.GET("/health/clusters", healthH.ClusterSummaries)
 		api.GET("/health/clusters/:clusterId/gpus", healthH.ClusterGPUs)
-		api.GET("/health/gpus/:uuid", healthH.GPUDetail)
 
 		// 故障知识图谱
 		api.GET("/faults/knowledge", faultH.List)

@@ -55,12 +55,15 @@
       </template>
     </n-modal>
   </div>
+
+  <GpuMetricDrawer v-model:show="showMetrics" :uuid="activeUuid" />
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { api } from "@/api";
 import { useMessage } from "naive-ui";
+import GpuMetricDrawer from "@/components/GpuMetricDrawer.vue";
 
 const message = useMessage();
 const treeData = ref<any[]>([]);
@@ -68,6 +71,8 @@ const selected = ref<any>(null);
 const showAdd = ref(false);
 const opUUID = ref("");
 const addForm = ref<any>({ uuid: "", cluster_id: 1, node_id: 1, gpu_index: 0, model: "H100-SXM5-80GB" });
+const showMetrics = ref(false);
+const activeUuid = ref("");
 
 // 顶层：加载集群
 async function loadClusters() {
@@ -104,7 +109,14 @@ async function onLoad(node: any) {
 
 function nodeProps(info: any) {
   return {
-    onClick: () => { selected.value = info.option.raw; }
+    onClick: () => {
+      selected.value = info.option.raw;
+      // 如果点击的是GPU节点，打开指标抽屉
+      if (info.option.type === "gpu") {
+        activeUuid.value = info.option.raw.uuid;
+        showMetrics.value = true;
+      }
+    }
   };
 }
 

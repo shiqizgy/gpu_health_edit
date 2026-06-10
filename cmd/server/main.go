@@ -4,6 +4,7 @@ import (
 	"flag"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gpu-health/platform/internal/ckclient"
 	"github.com/gpu-health/platform/internal/config"
 	"github.com/gpu-health/platform/internal/redisclient"
 	"github.com/gpu-health/platform/internal/repository"
@@ -44,7 +45,13 @@ func main() {
 		}
 	}()
 
-	r := router.Setup(db, rc, cfg.Assistant)
+	ck, err := ckclient.New(cfg.CK)
+	if err != nil {
+		logger.L.Fatalf("连接 ClickHouse 失败: %v", err)
+	}
+	defer ck.Close()
+
+	r := router.Setup(db, rc, cfg.Assistant, ck, cfg.CK.Table)
 	logger.L.Infof("API 服务启动于 %s", cfg.Server.Addr)
 	if err := r.Run(cfg.Server.Addr); err != nil {
 		logger.L.Fatalf("服务启动失败: %v", err)

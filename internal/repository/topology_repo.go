@@ -117,3 +117,12 @@ func (r *TopologyRepo) CountStrategyUsage(strategyID uint64) (clusterCnt, gpuCnt
 	r.db.Model(&model.GPUCard{}).Where("strategy_id = ?", strategyID).Count(&gpuCnt)
 	return
 }
+
+// GetGPUByUUID 按 uuid 取卡：下钻时解析出 sn / gpu_index 去 CK 查时序
+func (r *TopologyRepo) GetGPUByUUID(uuid string) (*model.GPUCard, error) {
+	var g model.GPUCard
+	if err := r.db.Where("uuid = ?", uuid).First(&g).Error; err != nil {
+		return nil, err
+	}
+	return &g, nil
+}

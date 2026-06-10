@@ -125,7 +125,7 @@ func (s *CKLoaderService) LoadOnce(ctx context.Context) error {
 		idx, _ := strconv.Atoi(m.tags)
 		if err := s.topo.UpsertGPU(&model.GPUCard{
 			UUID: uuid, NodeID: nodeID, ClusterID: clusterID,
-			GPUIndex: idx, Status: "online",
+			GPUIndex: idx, SN: m.sn, Status: "online", // ← 新增 SN: m.sn
 		}); err != nil {
 			logger.L.Warnf("upsert gpu %s: %v", uuid, err)
 		}

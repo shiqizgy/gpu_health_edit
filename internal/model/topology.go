@@ -47,6 +47,7 @@ type GPUCard struct {
 	Model      string    `gorm:"type:varchar(64)" json:"model"`                          // 型号 如 H100-SXM5-80GB
 	Status     string    `gorm:"type:varchar(32);not null;default:online" json:"status"` // online/offline/maintenance
 	StrategyID *uint64   `gorm:"index" json:"strategy_id"`                               // 评分策略ID，指针类型,NULL 表示未指定
+	SN         string    `gorm:"type:varchar(128);index" json:"sn"`                      //机器SN（CK时序查询使用）
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
