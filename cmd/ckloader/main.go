@@ -78,7 +78,12 @@ func main() {
 	// ---------- 5. 组装业务服务 ----------
 	// CKLoaderService 把 ck/redis/topo 三个依赖串成业务流程，
 	// 内部维护 cluster/node 的内存缓存，避免每次拉取都重复查 MySQL
-	loader := service.NewCKLoaderService(cfg.CK, ck, rc, repository.NewTopologyRepo(db))
+	loader := service.NewCKLoaderService(
+		cfg.CK, ck, rc,
+		repository.NewTopologyRepo(db),
+		repository.NewMetricRepo(db),
+		repository.NewStrategyRepo(db),
+	)
 
 	// 使用 Background 作为根上下文：定时任务无外部超时控制，
 	// 每轮内部由 CK / Redis 驱动各自的连接超时

@@ -62,3 +62,22 @@ func (r *MetricRepo) ListHealthKeys() ([]model.MetricDefinition, error) {
 	err := r.db.Where("is_health_key = ?", true).Find(&out).Error
 	return out, err
 }
+
+// ListAllKeys 返回所有已定义指标的 metric_key 列表
+func (r *MetricRepo) ListAllKeys() ([]string, error) {
+	var keys []string
+	err := r.db.Model(&model.MetricDefinition{}).Pluck("metric_key", &keys).Error
+	return keys, err
+}
+
+// UpdateHealthKeyByMetricKeys 批量更新某些指标的 is_health_key 状态。
+// keys 为空时不执行，避免误操作把全表刷成同一状态。
+func (r *MetricRepo) UpdateHealthKeyByMetricKeys(keys []string, enabled bool) (int64, error) {
+	if len(keys) == 0 {
+		return 0, nil
+	}
+	res := r.db.Model(&model.MetricDefinition{}).
+		Where("metric_key IN ? AND is_health_key <> ?", keys, enabled).
+		Update("is_health_key", enabled)
+	return res.RowsAffected, res.Error
+}
