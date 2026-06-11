@@ -2,8 +2,17 @@
   <div>
     <div class="toolbar">
       <n-space>
+        <n-input v-model:value="keyword" placeholder="搜索指标名/显示名/概念/备注"
+          clearable style="width: 240px"
+          @keydown.enter="reload" @clear="reload" />
         <n-select v-model:value="dimFilter" :options="dimOptions" placeholder="按维度筛选"
-          clearable style="width: 180px" @update:value="load" />
+          clearable style="width: 170px" @update:value="reload" />
+        <n-select v-model:value="deviceFilter" :options="deviceOptions" placeholder="按设备筛选"
+          clearable style="width: 140px" @update:value="reload" />
+        <n-select v-model:value="typeFilter" :options="typeOptions" placeholder="按类型筛选"
+          clearable style="width: 150px" @update:value="reload" />
+        <n-checkbox v-model:checked="healthKeyOnly" @update:checked="reload">仅参与评分</n-checkbox>
+        <n-button @click="reload">搜索</n-button>
         <n-button type="primary" @click="openCreate">+ 新建指标</n-button>
       </n-space>
     </div>
@@ -16,6 +25,14 @@
         :max-height="620"
         size="small"
       />
+      <div class="pager">
+            <n-pagination
+              v-model:page="page"
+              :page-count="pageCount"
+              :page-size="pageSize"
+              @update:page="load"
+            />
+          </div>
     </div>
 
     <!-- 新建/编辑弹窗 -->
@@ -84,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, h, onMounted } from "vue";
+import { ref, h, computed, onMounted } from "vue";
 import { api } from "@/api";
 import { useMessage, useDialog, NButton, NSpace, NTag } from "naive-ui";
 
@@ -126,6 +143,16 @@ const dimFilter = ref<string | null>(null);
 const showModal = ref(false);
 const editing = ref(false);
 const form = ref<any>(emptyForm());
+const deviceFilter = ref<string | null>(null);
+const typeFilter = ref<string | null>(null);
+const keyword = ref("");
+const healthKeyOnly = ref(false);
+
+// 分页
+const page = ref(1);
+const pageSize = 20;
+const total = ref(0);
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)));
 
 function emptyForm() {
   return {
@@ -159,9 +186,25 @@ const columns = [
 ];
 
 async function load() {
-  const params: any = {};
+  const params: any = {
+    limit: pageSize,
+    offset: (page.value - 1) * pageSize,
+  };
+  if (keyword.value.trim()) params.keyword = keyword.value.trim();
   if (dimFilter.value) params.dimension = dimFilter.value;
-  rows.value = await api.metrics(params);
+  if (deviceFilter.value) params.device_type = deviceFilter.value;
+  if (typeFilter.value) params.metric_type = typeFilter.value;
+  if (healthKeyOnly.value) params.is_health_key = "true";
+
+  const res = await api.metrics(params);
+  rows.value = res.items || [];   // 后端现在返回 { total, items }
+  total.value = res.total || 0;
+}
+
+// 任意搜索条件变化时，回到第1页再取数
+function reload() {
+  page.value = 1;
+  load();
 }
 
 function openCreate() {

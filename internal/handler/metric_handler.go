@@ -2,6 +2,7 @@ package handler
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gpu-health/platform/internal/model"
@@ -20,15 +21,31 @@ func NewMetricHandler(repo *repository.MetricRepo, strategyRepo *repository.Stra
 }
 
 func (h *MetricHandler) List(c *gin.Context) {
-	dimension := c.Query("dimension")
-	deviceType := c.Query("device_type")
-	healthKeyOnly := c.Query("is_health_key") == "true"
-	list, err := h.repo.List(dimension, deviceType, healthKeyOnly)
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if limit <= 0 || limit > 200 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	q := repository.MetricQuery{
+		Dimension:     c.Query("dimension"),
+		DeviceType:    c.Query("device_type"),
+		MetricType:    c.Query("metric_type"),
+		Keyword:       strings.TrimSpace(c.Query("keyword")),
+		HealthKeyOnly: c.Query("is_health_key") == "true",
+		Limit:         limit,
+		Offset:        offset,
+	}
+
+	list, total, err := h.repo.List(q)
 	if err != nil {
 		response.ServerError(c, err.Error())
 		return
 	}
-	response.OK(c, list)
+	response.Page(c, total, list) // 返回 { total, items }
 }
 
 func (h *MetricHandler) Create(c *gin.Context) {

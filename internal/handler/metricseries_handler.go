@@ -91,7 +91,7 @@ func (h *MetricSeriesHandler) GPUMetrics(c *gin.Context) {
 	bucket := pickBucket(from, to, maxPoints)
 
 	// 4) 指标元数据（类型/维度/单位）来自 metric_definition，单一真相源
-	defs, err := h.metric.List("", "", false)
+	defs, _, err := h.metric.List(repository.MetricQuery{})
 	if err != nil {
 		response.ServerError(c, err.Error())
 		return
@@ -99,7 +99,10 @@ func (h *MetricSeriesHandler) GPUMetrics(c *gin.Context) {
 	meta := map[string]struct{ disp, dim, typ, unit string }{}
 	for _, d := range defs {
 		meta[d.MetricKey] = struct{ disp, dim, typ, unit string }{
-			d.DisplayName, d.Dimension, d.MetricType, d.Unit}
+			disp: d.DisplayName,
+			dim:  d.Dimension,
+			typ:  d.MetricType,
+			unit: d.Unit}
 	}
 
 	// 5) 请求的指标（默认给一组代表指标）

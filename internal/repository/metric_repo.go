@@ -10,20 +10,54 @@ type MetricRepo struct{ db *gorm.DB }
 
 func NewMetricRepo(db *gorm.DB) *MetricRepo { return &MetricRepo{db: db} }
 
-func (r *MetricRepo) List(dimension, deviceType string, healthKeyOnly bool) ([]model.MetricDefinition, error) {
-	q := r.db.Model(&model.MetricDefinition{})
-	if dimension != "" {
-		q = q.Where("dimension = ?", dimension)
+// MetricQuery 指标列表查询条件（分页 + 多条件过滤 + 关键字模糊查找）
+type MetricQuery struct {
+	Dimension     string // 维度精确匹配
+	DeviceType    string // 设备类型精确匹配
+	MetricType    string // 指标类型精确匹配
+	Keyword       string // 关键字，模糊匹配 metric_key/display_name/concept/remark
+	HealthKeyOnly bool   // 只看参与评分的指标
+	Limit         int
+	Offset        int
+}
+
+// List 按条件分页查询指标，返回当前页数据 + 命中总数。
+func (r *MetricRepo) List(q MetricQuery) ([]model.MetricDefinition, int64, error) {
+	tx := r.db.Model(&model.MetricDefinition{})
+	if q.Dimension != "" {
+		tx = tx.Where("dimension = ?", q.Dimension)
 	}
-	if deviceType != "" {
-		q = q.Where("device_type = ?", deviceType)
+	if q.DeviceType != "" {
+		tx = tx.Where("device_type = ?", q.DeviceType)
 	}
-	if healthKeyOnly {
-		q = q.Where("is_health_key = ?", true)
+	if q.MetricType != "" {
+		tx = tx.Where("metric_type = ?", q.MetricType)
+	}
+	if q.HealthKeyOnly {
+		tx = tx.Where("is_health_key = ?", true)
+	}
+	if q.Keyword != "" {
+		like := "%" + q.Keyword + "%"
+		tx = tx.Where(
+			"metric_key LIKE ? OR display_name LIKE ? OR concept LIKE ? OR remark LIKE ?",
+			like, like, like, like,
+		)
+	}
+
+	// 先在过滤条件上数总数（注意要在 Limit/Offset 之前）
+	var total int64
+	if err := tx.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if q.Limit <= 0 {
+		q.Limit = 20
 	}
 	var out []model.MetricDefinition
-	err := q.Order("dimension, id").Find(&out).Error
-	return out, err
+	err := tx.Order("dimension, id").
+		Limit(q.Limit).Offset(q.Offset).
+		Find(&out).Error
+	return out, total, err
 }
 
 func (r *MetricRepo) Get(id uint64) (*model.MetricDefinition, error) {
