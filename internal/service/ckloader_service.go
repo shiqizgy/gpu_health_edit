@@ -224,13 +224,9 @@ func (s *CKLoaderService) ensureCluster(source string) (uint64, error) {
 	if id, ok := s.clusterCache[source]; ok {
 		return id, nil
 	}
-	c := &model.Cluster{Code: source, Name: source}
-	if err := s.topo.CreateCluster(c); err != nil {
-		var ex model.Cluster
-		if e := s.topo.DB().Where("code=?", source).First(&ex).Error; e != nil {
-			return 0, e
-		}
-		c.ID = ex.ID
+	c := model.Cluster{Code: source, Name: source}
+	if err := s.topo.DB().Where("code = ?", source).FirstOrCreate(&c).Error; err != nil {
+		return 0, err
 	}
 	s.clusterCache[source] = c.ID
 	return c.ID, nil
@@ -240,13 +236,9 @@ func (s *CKLoaderService) ensureNode(clusterID uint64, sn, ip string) (uint64, e
 	if id, ok := s.nodeCache[sn]; ok {
 		return id, nil
 	}
-	n := &model.Node{ClusterID: clusterID, Hostname: sn, IP: ip, GPUCount: 8}
-	if err := s.topo.CreateNode(n); err != nil {
-		var ex model.Node
-		if e := s.topo.DB().Where("hostname=?", sn).First(&ex).Error; e != nil {
-			return 0, e
-		}
-		n.ID = ex.ID
+	n := model.Node{ClusterID: clusterID, Hostname: sn, IP: ip, GPUCount: 8}
+	if err := s.topo.DB().Where("hostname = ?", sn).FirstOrCreate(&n).Error; err != nil {
+		return 0, err
 	}
 	s.nodeCache[sn] = n.ID
 	return n.ID, nil
