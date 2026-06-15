@@ -3,6 +3,7 @@ package router
 import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/gpu-health/platform/internal/ckclient"
 	"github.com/gpu-health/platform/internal/config"
 	"github.com/gpu-health/platform/internal/handler"
 	"github.com/gpu-health/platform/internal/redisclient"
@@ -12,7 +13,7 @@ import (
 )
 
 // Setup 装配所有路由。handler 在这里实例化，依赖通过参数注入，结构清晰。
-func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantConfig) *gin.Engine {
+func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantConfig, ck *ckclient.Client, table string) *gin.Engine {
 	r := gin.Default()
 
 	// CORS：允许前端 dev server
@@ -43,6 +44,7 @@ func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantCon
 	faultH := handler.NewFaultHandler(faultRepo, rc)
 	faultEventH := handler.NewFaultEventHandler(faultEventRepo)
 	assistantH := handler.NewAssistantHandler(assistantSvc, assistantRepo)
+	metricSeriesH := handler.NewMetricSeriesHandler(ck, table, topoRepo, metricRepo)
 
 	api := r.Group("/api/v1")
 	{
@@ -99,6 +101,9 @@ func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantCon
 		api.GET("/assistant/conversations/:id", assistantH.GetConversation)
 		api.PUT("/assistant/conversations/:id", assistantH.UpdateConversation)
 		api.DELETE("/assistant/conversations/:id", assistantH.DeleteConversation)
+
+		// 新增：单卡时序曲线
+		api.GET("/health/gpus/:uuid/metrics", metricSeriesH.GPUMetrics)
 	}
 
 	return r

@@ -149,3 +149,13 @@ func (r *TopologyRepo) CountStrategyUsage(strategyID uint64) (clusterCnt, gpuCnt
 	r.db.Model(&model.GPUCard{}).Where("strategy_id = ?", strategyID).Count(&gpuCnt)
 	return
 }
+
+// GetGPUByUUID 根据 UUID 查询单张 GPU 卡
+func (r *TopologyRepo) GetGPUByUUID(uuid string) (*model.GPUCard, error) {
+	var g model.GPUCard
+	err := r.db.Where("uuid = ?", uuid).First(&g).Error
+	if err != nil {
+		return nil, err
+	}
+	return &g, nil
+}
