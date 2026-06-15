@@ -52,6 +52,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&model.GPUHealthSnapshot{},
 		&model.ClusterHealthSummary{},
 		&model.FaultKnowledge{},
+		&model.FaultRule{},
+		&model.FaultEvent{},
 		&model.AIConversation{},
 		&model.AIMessage{},
 	)

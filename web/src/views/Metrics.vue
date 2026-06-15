@@ -78,6 +78,14 @@
             <n-form-item label="异常范围">
               <n-input v-model:value="form.abnormal_range" placeholder=">=87" />
             </n-form-item>
+            <n-form-item label="方向">
+              <n-select v-model:value="form.direction" :options="[
+                {label:'越高越差 high_bad',value:'high_bad'},
+                {label:'越低越差 low_bad',value:'low_bad'},
+                {label:'区间 range',value:'range'}]" />
+            </n-form-item>
+            <n-form-item label="告警阈值"><n-input-number v-model:value="form.warn_threshold" /></n-form-item>
+            <n-form-item label="严重阈值"><n-input-number v-model:value="form.crit_threshold" /></n-form-item>
           </n-gi>
         </n-grid>
         <n-form-item label="概念说明">
@@ -158,7 +166,8 @@ function emptyForm() {
   return {
     id: 0, metric_key: "", display_name: "", unit: "", metric_type: "gauge",
     dimension: "performance", concept: "", device_type: "gpu",
-    normal_range: "", abnormal_range: "", remark: "", is_health_key: true
+    normal_range: "", abnormal_range: "", remark: "", is_health_key: true,
+    direction: "high_bad", warn_threshold: null, crit_threshold: null, normal_min: null, normal_max: null,
   };
 }
 

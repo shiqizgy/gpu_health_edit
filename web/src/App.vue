@@ -51,6 +51,7 @@ const titleMap: Record<string, string> = {
   topology: "集群拓扑",
   health: "健康值",
   "fault-knowledge": "故障知识图谱",
+  "fault-pool": "故障池",
   "fault-predict": "故障预测",
   "fault-rca": "故障根因分析",
   "fault-assistant": "AI 故障分析助手",
@@ -72,6 +73,7 @@ const menuOptions = [
     label: "GPU 故障", key: "fault",
     children: [
       { label: "故障知识图谱", key: "fault-knowledge" },
+      { label: "故障池", key: "fault-pool" },
       { label: "故障预测", key: "fault-predict" },
       { label: "故障根因分析", key: "fault-rca" },
       { label: "AI 故障分析助手", key: "fault-assistant" }

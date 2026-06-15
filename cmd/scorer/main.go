@@ -41,9 +41,12 @@ func main() {
 	metricRepo := repository.NewMetricRepo(db)
 	healthRepo := repository.NewHealthRepo(db)
 	topoRepo := repository.NewTopologyRepo(db)
+	faultEventRepo := repository.NewFaultEventRepo(db)
+	faultRuleRepo := repository.NewFaultRuleRepo(db)
 
 	strategySvc := service.NewStrategyService(strategyRepo, metricRepo)
-	scorer := service.NewScorerService(rc, healthRepo, topoRepo, strategySvc, cfg.Scorer.StrategyCode)
+	faultDetectSvc := service.NewFaultDetectService(faultEventRepo, faultRuleRepo, metricRepo, topoRepo)
+	scorer := service.NewScorerService(rc, healthRepo, topoRepo, strategySvc, cfg.Scorer.StrategyCode, faultDetectSvc)
 
 	if *once {
 		if err := scorer.RunOnce(context.Background()); err != nil {

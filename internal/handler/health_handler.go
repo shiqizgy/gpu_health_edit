@@ -5,16 +5,23 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gpu-health/platform/internal/repository"
+	"github.com/gpu-health/platform/internal/scoring"
 	"github.com/gpu-health/platform/pkg/response"
 )
 
-// HealthHandler 健康值（集群表格 → 点击展开单卡评分）
+// HealthHandler 健康值（集群表格 → 点击展开单卡评分 → 单卡异常指标）
 type HealthHandler struct {
-	health *repository.HealthRepo
+	health     *repository.HealthRepo
+	metricRepo *repository.MetricRepo
+	faultEvent *repository.FaultEventRepo
 }
 
-func NewHealthHandler(health *repository.HealthRepo) *HealthHandler {
-	return &HealthHandler{health: health}
+func NewHealthHandler(
+	health *repository.HealthRepo,
+	metricRepo *repository.MetricRepo,
+	faultEvent *repository.FaultEventRepo,
+) *HealthHandler {
+	return &HealthHandler{health: health, metricRepo: metricRepo, faultEvent: faultEvent}
 }
 
 // ClusterSummaries 集群健康汇总表格（查预聚合表）
@@ -43,7 +50,7 @@ func (h *HealthHandler) ClusterGPUs(c *gin.Context) {
 	response.Page(c, total, list)
 }
 
-// GPUDetail 单卡评分详情（含维度 breakdown）
+// GPUDetail 单卡评分详情：快照 + 异常指标(需求1) + 当前 open 故障
 func (h *HealthHandler) GPUDetail(c *gin.Context) {
 	uuid := c.Param("uuid")
 	snap, err := h.health.GetSnapshot(uuid)
@@ -51,5 +58,21 @@ func (h *HealthHandler) GPUDetail(c *gin.Context) {
 		response.Fail(c, 404, "该卡暂无评分数据")
 		return
 	}
-	response.OK(c, snap)
+
+	// 仅当不健康时解析异常指标；健康卡返回空列表
+	abnormal := []scoring.AbnormalMetric{}
+	if snap.Level != "healthy" {
+		defs, derr := h.metricRepo.AllDefsMap()
+		if derr == nil {
+			abnormal = scoring.PickAbnormal(snap.Breakdown, defs)
+		}
+	}
+
+	faults, _ := h.faultEvent.ListOpenByGPU(uuid)
+
+	response.OK(c, gin.H{
+		"snapshot": snap,
+		"abnormal": abnormal,
+		"faults":   faults,
+	})
 }

@@ -76,6 +76,38 @@ func (r *TopologyRepo) AllOnlineGPUs() ([]model.GPUCard, error) {
 	return out, err
 }
 
+// GPUMeta 给故障池用：uuid -> 节点主机名 + 集群名 + 集群ID
+type GPUMeta struct {
+	NodeHost    string
+	ClusterName string
+	ClusterID   uint64
+}
+
+// GPUMetaMap 返回所有在线 GPU 的 uuid -> {节点主机名, 集群名, 集群ID} 映射。
+func (r *TopologyRepo) GPUMetaMap() (map[string]GPUMeta, error) {
+	type row struct {
+		UUID        string `gorm:"column:uuid"`
+		NodeHost    string `gorm:"column:node_host"`
+		ClusterName string `gorm:"column:cluster_name"`
+		ClusterID   uint64 `gorm:"column:cluster_id"`
+	}
+	var rows []row
+	err := r.db.Table("gpu_card AS g").
+		Select("g.uuid, n.hostname AS node_host, c.name AS cluster_name, g.cluster_id").
+		Joins("JOIN node n ON n.id = g.node_id").
+		Joins("JOIN cluster c ON c.id = g.cluster_id").
+		Where("g.status = ?", "online").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]GPUMeta, len(rows))
+	for _, x := range rows {
+		m[x.UUID] = GPUMeta{NodeHost: x.NodeHost, ClusterName: x.ClusterName, ClusterID: x.ClusterID}
+	}
+	return m, nil
+}
+
 func (r *TopologyRepo) DB() *gorm.DB {
 	return r.db
 }
@@ -116,13 +148,4 @@ func (r *TopologyRepo) CountStrategyUsage(strategyID uint64) (clusterCnt, gpuCnt
 	r.db.Model(&model.Cluster{}).Where("strategy_id = ?", strategyID).Count(&clusterCnt)
 	r.db.Model(&model.GPUCard{}).Where("strategy_id = ?", strategyID).Count(&gpuCnt)
 	return
-}
-
-// GetGPUByUUID 按 uuid 取卡：下钻时解析出 sn / gpu_index 去 CK 查时序
-func (r *TopologyRepo) GetGPUByUUID(uuid string) (*model.GPUCard, error) {
-	var g model.GPUCard
-	if err := r.db.Where("uuid = ?", uuid).First(&g).Error; err != nil {
-		return nil, err
-	}
-	return &g, nil
 }

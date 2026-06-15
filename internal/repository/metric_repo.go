@@ -81,6 +81,11 @@ func (r *MetricRepo) Update(id uint64, m *model.MetricDefinition) error {
 		"device_type":    m.DeviceType,
 		"normal_range":   m.NormalRange,
 		"abnormal_range": m.AbnormalRange,
+		"direction":      m.Direction,
+		"warn_threshold": m.WarnThreshold,
+		"crit_threshold": m.CritThreshold,
+		"normal_min":     m.NormalMin,
+		"normal_max":     m.NormalMax,
 		"remark":         m.Remark,
 		"is_health_key":  m.IsHealthKey,
 	}).Error
@@ -114,4 +119,19 @@ func (r *MetricRepo) UpdateHealthKeyByMetricKeys(keys []string, enabled bool) (i
 		Where("metric_key IN ? AND is_health_key <> ?", keys, enabled).
 		Update("is_health_key", enabled)
 	return res.RowsAffected, res.Error
+}
+
+//故障检测/异常指标展示使用：
+//AllDefsMap 返回 metric_key -> 指标定义 的全量映射（故障检测/异常指标展示用）
+
+func (r *MetricRepo) AllDefsMap() (map[string]model.MetricDefinition, error) {
+	var rows []model.MetricDefinition
+	if err := r.db.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	m := make(map[string]model.MetricDefinition, len(rows))
+	for _, d := range rows {
+		m[d.MetricKey] = d
+	}
+	return m, nil
 }

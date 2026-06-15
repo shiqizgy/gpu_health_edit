@@ -252,6 +252,57 @@
       </n-space>
     </template>
   </n-modal>
+  <!-- 单卡异常详情抽屉(需求1) -->
+  <n-drawer v-model:show="detailShow" :width="520">
+    <n-drawer-content :title="detailSnap ? ('单卡详情 · ' + (levelNames[detailSnap.level] || detailSnap.level)) : '单卡详情'" closable>
+      <n-spin :show="detailLoading">
+        <div v-if="detailSnap">
+          <div class="gd-head">
+            <div class="gd-uuid mono">{{ detailSnap.gpu_uuid }}</div>
+            <div class="gd-score">
+              总分 <b :style="`color:${scoreColor(detailSnap.score)}`">{{ detailSnap.score.toFixed(1) }}</b>
+              <span :class="`level-badge lv-${detailSnap.level}`" style="margin-left:8px">{{ levelNames[detailSnap.level] || detailSnap.level }}</span>
+              <span v-if="detailSnap.veto" style="color:#ef4444;font-weight:600;margin-left:8px">VETO: {{ detailSnap.veto_reason }}</span>
+            </div>
+          </div>
+
+          <template v-if="detailSnap.level === 'healthy'">
+            <div class="gd-empty">该卡处于健康状态，各项指标正常。</div>
+          </template>
+          <template v-else>
+            <div class="gd-section">不正常的指标（{{ detailAbnormal.length }}）</div>
+            <div v-if="detailAbnormal.length === 0" class="gd-empty">未解析到异常指标明细。</div>
+            <table v-else class="gd-table">
+              <thead>
+                <tr><th>指标</th><th>当前值</th><th>阈值/正常区间</th><th>得分</th><th>严重度</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="m in detailAbnormal" :key="m.metric_key">
+                  <td>
+                    <div>{{ m.display_name }}</div>
+                    <div class="mono gd-key">{{ m.metric_key }}</div>
+                  </td>
+                  <td class="mono">{{ fmtNum(m.value) }}<span v-if="m.unit"> {{ m.unit }}</span></td>
+                  <td class="gd-thr">{{ thresholdText(m) }}</td>
+                  <td class="mono" :style="`color:${abnSevColor(m.severity)};font-weight:600`">{{ m.score.toFixed(1) }}</td>
+                  <td :style="`color:${abnSevColor(m.severity)}`">{{ m.severity === 'critical' ? '严重' : '告警' }}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div class="gd-section" style="margin-top:18px">当前故障（{{ detailFaults.length }}）</div>
+            <div v-if="detailFaults.length === 0" class="gd-empty">暂无进行中的故障事件。</div>
+            <div v-else class="gd-faults">
+              <div v-for="f in detailFaults" :key="f.id" class="gd-fault">
+                <span class="gd-fname" :style="`color:${f.severity === 'warning' ? '#eab308' : '#ef4444'}`">{{ f.fault_name }}</span>
+                <span class="mono gd-key">{{ f.metric_display || f.metric_key || '' }}</span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </n-spin>
+    </n-drawer-content>
+  </n-drawer>
 
 </template>
 
@@ -343,9 +394,12 @@ const gpuCols = [
       return h("span", { style: "font-size:12px;color:var(--text-1)" }, label);
     }
   },
-  { title: "操作", key: "ops", width: 100,
-    render: (r: any) => h(NButton, { size: "tiny",
-      onClick: () => openAssignGPU(r) }, () => "分配策略") }
+  { title: "操作", key: "ops", width: 170,
+    render: (r: any) => h("div", { style: "display:flex;gap:6px" }, [
+      h(NButton, { size: "tiny", type: r.level === "healthy" ? "default" : "warning",
+        onClick: () => openGPUDetail(r) }, () => "异常详情"),
+      h(NButton, { size: "tiny", onClick: () => openAssignGPU(r) }, () => "分配策略"),
+    ]) }
 ];
 
 async function loadClusters() {
@@ -356,6 +410,46 @@ async function loadGPUs() {
   const res = await api.healthClusterGPUs(activeCluster.value.cluster_id, pageSize, (page.value - 1) * pageSize);
   gpus.value = res.items || [];
   total.value = res.total || 0;
+}
+
+// ---- 单卡异常详情(需求1) ----
+const detailShow = ref(false);
+const detailLoading = ref(false);
+const detailSnap = ref<any>(null);
+const detailAbnormal = ref<any[]>([]);
+const detailFaults = ref<any[]>([]);
+
+async function openGPUDetail(row: any) {
+  detailShow.value = true;
+  detailLoading.value = true;
+  detailSnap.value = null;
+  detailAbnormal.value = [];
+  detailFaults.value = [];
+  try {
+    const res = await api.healthGPUDetail(row.gpu_uuid);
+    detailSnap.value = res.snapshot;
+    detailAbnormal.value = res.abnormal || [];
+    detailFaults.value = res.faults || [];
+  } catch (e: any) {
+    message.error(e?.response?.data?.msg || "加载详情失败");
+  } finally {
+    detailLoading.value = false;
+  }
+}
+
+function abnSevColor(s: string) {
+  return s === "critical" ? "#ef4444" : "#eab308";
+}
+function fmtNum(v: any) {
+  if (v === null || v === undefined) return "—";
+  return typeof v === "number" ? Number(v.toFixed(2)) : v;
+}
+function thresholdText(m: any) {
+  const parts: string[] = [];
+  if (m.warn_threshold !== null && m.warn_threshold !== undefined) parts.push(`告警 ${m.warn_threshold}`);
+  if (m.crit_threshold !== null && m.crit_threshold !== undefined) parts.push(`严重 ${m.crit_threshold}`);
+  if (parts.length === 0 && m.normal_range) return `正常 ${m.normal_range}`;
+  return parts.join(" / ") || "—";
 }
 
 // ---- 策略管理 ----
@@ -928,5 +1022,20 @@ async function deleteStrategy(row: any) {
   background: rgba(239,68,68,0.15); color: #ef4444;
   padding: 1px 6px; border-radius: 3px; margin-left: 6px;
 }
+
+/* 单卡异常详情抽屉 */
+.gd-head { margin-bottom: 16px; }
+.gd-uuid { font-size: 12px; color: #9aa7b4; word-break: break-all; }
+.gd-score { font-size: 14px; margin-top: 6px; }
+.gd-section { font-size: 13px; color: var(--text-1); font-weight: 600; margin: 8px 0; letter-spacing: 0.04em; }
+.gd-empty { font-size: 13px; color: var(--text-2); padding: 10px 0; }
+.gd-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.gd-table th, .gd-table td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.gd-table th { color: var(--text-2); font-weight: 500; }
+.gd-key { font-size: 11px; color: var(--text-2); }
+.gd-thr { color: var(--text-2); }
+.gd-faults { display: flex; flex-direction: column; gap: 6px; }
+.gd-fault { display: flex; align-items: center; gap: 10px; padding: 6px 8px; background: var(--bg-2); border-radius: 4px; }
+.gd-fname { font-size: 13px; font-weight: 600; }
 
 </style>

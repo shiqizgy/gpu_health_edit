@@ -22,6 +22,7 @@ type ScorerService struct {
 	topo         *repository.TopologyRepo
 	strategy     *StrategyService
 	strategyCode string
+	faultDetect  *FaultDetectService // 可为 nil（不启用故障池时）
 }
 
 func NewScorerService(
@@ -30,10 +31,12 @@ func NewScorerService(
 	topo *repository.TopologyRepo,
 	strategy *StrategyService,
 	strategyCode string,
+	faultDetect *FaultDetectService,
 ) *ScorerService {
 	return &ScorerService{
 		redis: rc, health: health, topo: topo,
 		strategy: strategy, strategyCode: strategyCode,
+		faultDetect: faultDetect,
 	}
 }
 
@@ -101,6 +104,7 @@ func (s *ScorerService) RunOnce(ctx context.Context) error {
 	// 5. 逐卡评分(各用各的策略)
 	now := time.Now()
 	snaps := make([]model.GPUHealthSnapshot, 0, len(frames))
+	cardScores := make(map[string]scoring.CardScore, len(frames)) // 供故障检测
 	for _, f := range frames {
 		b, known := bindOf[f.UUID]
 		// 选策略: 绑定的(且编译成功) → 否则默认
@@ -116,6 +120,7 @@ func (s *ScorerService) RunOnce(ctx context.Context) error {
 		}
 
 		result := scoring.Score(f.Metrics, compiled)
+		cardScores[f.UUID] = scoring.CardScore{Metrics: f.Metrics, Result: result}
 		snaps = append(snaps, model.GPUHealthSnapshot{
 			GPUUUID:    f.UUID,
 			ClusterID:  clusterID,
@@ -139,6 +144,14 @@ func (s *ScorerService) RunOnce(ctx context.Context) error {
 	if err := s.health.RecomputeClusterSummaries(); err != nil {
 		logger.L.Errorf("重算集群汇总失败: %v", err)
 		return err
+	}
+
+	// 8. 故障检测 + 故障池对账（启用时）
+	if s.faultDetect != nil {
+		if err := s.faultDetect.Process(ctx, now, cardScores); err != nil {
+			logger.L.Errorf("故障检测失败: %v", err)
+			// 不阻断主流程：评分已落库，故障池失败仅记日志
+		}
 	}
 
 	logger.L.Infof("评分完成：%d 张卡(用到 %d 个非默认策略),耗时 %s",

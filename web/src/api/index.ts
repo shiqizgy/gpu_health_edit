@@ -119,6 +119,11 @@ export const api = {
   injectFault: (uuid: string, mode: string) => http.post<any, any>("/faults/inject", { uuid, mode }),
   listFaults: () => http.get<any, any>("/faults/inject"),
 
+  //故障池
+  faultPool: (params?: any) => http.get<any, any>("/faults/pool", { params }),
+  faultPoolStats: () => http.get<any, any>("/faults/pool/stats"),
+  resolveFault: (id: number) => http.put<any, any>(`/faults/pool/${id}/resolve`),
+  
   //AI助手会话
   listConversations: () => http.get<any, any>("/assistant/conversations"),
   createConversation: (data: any) => http.post<any, any>("/assistant/conversations", data),

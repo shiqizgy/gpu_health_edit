@@ -24,6 +24,11 @@ type MetricDefinition struct {
 	DeviceType    string    `gorm:"type:varchar(32);not null;default:gpu" json:"device_type"` // 所属设备
 	NormalRange   string    `gorm:"type:varchar(128)" json:"normal_range"`                    // 正常取值范围
 	AbnormalRange string    `gorm:"type:varchar(128)" json:"abnormal_range"`                  // 异常取值范围
+	Direction     string    `gorm:"type:varchar(16);default:high_bad" json:"driection"`       // high_bad/low_bad/range
+	WarnThreshold *float64  `gorm:"type:double" json:"warn_threshold"`                        //告警阈值
+	CritThreshold *float64  `gorm:"type:double" json:"crit_threshold"`                        //严重阈值
+	NormalMin     *float64  `gorm:"type:double" json:"normal_min"`                            //range模式指标下界
+	NormalMax     *float64  `gorm:"type:double" json:"normal_max"`                            //range模式指标上界
 	Remark        string    `gorm:"type:varchar(255)" json:"remark"`                          // 备注
 	IsHealthKey   bool      `gorm:"default:true" json:"is_health_key"`                        // 是否参与健康评分
 	CreatedAt     time.Time `json:"created_at"`

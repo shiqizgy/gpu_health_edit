@@ -9,6 +9,7 @@ const routes = [
   { path: "/health", name: "health", component: () => import("@/views/Health.vue") },
   // GPU 故障
   { path: "/fault/knowledge", name: "fault-knowledge", component: () => import("@/views/FaultKnowledge.vue") },
+  { path: "/fault/pool", name: "fault-pool", component: () => import("@/views/FaultPool.vue") },
   { path: "/fault/predict", name: "fault-predict", component: () => import("@/views/FaultPredict.vue") },
   { path: "/fault/rca", name: "fault-rca", component: () => import("@/views/FaultRCA.vue") },
   { path: "/fault/assistant", name: "fault-assistant", component: () => import("@/views/Assistant.vue") },
