@@ -30,6 +30,9 @@ server:
 scorer:
 	@go run ./cmd/scorer
 
+app:
+	@go run ./cmd/app
+
 simulator:
 	@go run ./cmd/simulator
 

@@ -9,6 +9,7 @@ import (
 	"github.com/gpu-health/platform/internal/repository"
 	"github.com/gpu-health/platform/internal/scoring"
 	"github.com/gpu-health/platform/pkg/logger"
+	"github.com/gpu-health/platform/pkg/pool"
 )
 
 // ScorerService 评分服务核心逻辑（每分钟执行一次）。
@@ -23,6 +24,7 @@ type ScorerService struct {
 	strategy     *StrategyService
 	strategyCode string
 	faultDetect  *FaultDetectService // 可为 nil（不启用故障池时）
+	pool         *pool.Pool
 }
 
 func NewScorerService(
@@ -32,11 +34,16 @@ func NewScorerService(
 	strategy *StrategyService,
 	strategyCode string,
 	faultDetect *FaultDetectService,
+	p *pool.Pool,
 ) *ScorerService {
 	return &ScorerService{
-		redis: rc, health: health, topo: topo,
-		strategy: strategy, strategyCode: strategyCode,
-		faultDetect: faultDetect,
+		redis:        rc,
+		health:       health,
+		topo:         topo,
+		strategy:     strategy,
+		strategyCode: strategyCode,
+		faultDetect:  faultDetect,
+		pool:         p,
 	}
 }
 
@@ -101,41 +108,53 @@ func (s *ScorerService) RunOnce(ctx context.Context) error {
 		compiledCache[*b.strategyID] = cs
 	}
 
-	// 5. 逐卡评分(各用各的策略)
+	// 5. 逐卡评分（并行：bindOf/compiledCache/defaultStrategy 均为只读，按下标写互不重叠，安全）
 	now := time.Now()
-	snaps := make([]model.GPUHealthSnapshot, 0, len(frames))
-	cardScores := make(map[string]scoring.CardScore, len(frames)) // 供故障检测
-	for _, f := range frames {
-		b, known := bindOf[f.UUID]
-		// 选策略: 绑定的(且编译成功) → 否则默认
-		compiled := defaultStrategy
-		if known && b.strategyID != nil {
-			if cs, ok := compiledCache[*b.strategyID]; ok {
-				compiled = cs
+	snaps := make([]model.GPUHealthSnapshot, len(frames)) //预分配，按下标写
+	entries := make([]scoring.CardScore, len(frames))     //故障检测用，先按下标存切片
+	s.pool.Partition(len(frames), func(start, end int) {
+		for i := start; i < end; i++ {
+			f := frames[i]
+			compiled := defaultStrategy
+			clusterID := uint64(0)
+			if b, known := bindOf[f.UUID]; known {
+				clusterID = b.clusterID
+				if b.strategyID != nil {
+					if cs, ok := compiledCache[*b.strategyID]; ok {
+						compiled = cs
+					}
+				}
 			}
-		}
-		clusterID := uint64(0)
-		if known {
-			clusterID = b.clusterID
-		}
 
-		result := scoring.Score(f.Metrics, compiled)
-		cardScores[f.UUID] = scoring.CardScore{Metrics: f.Metrics, Result: result}
-		snaps = append(snaps, model.GPUHealthSnapshot{
-			GPUUUID:    f.UUID,
-			ClusterID:  clusterID,
-			StrategyID: compiled.StrategyID, // 记录实际用的策略,前端可展示
-			Score:      result.Score,
-			Level:      result.Level,
-			Veto:       result.Veto,
-			VetoReason: result.VetoReason,
-			Breakdown:  scoring.BreakdownJSON(result),
-			ScoredAt:   now,
-		})
+			result := scoring.Score(f.Metrics, compiled)
+			entries[i] = scoring.CardScore{Metrics: f.Metrics, Result: result}
+
+			snap := model.GPUHealthSnapshot{
+				GPUUUID:    f.UUID,
+				ClusterID:  clusterID,
+				StrategyID: compiled.StrategyID,
+				Score:      result.Score,
+				Level:      result.Level,
+				Veto:       result.Veto,
+				VetoReason: result.VetoReason,
+				Breakdown:  "null",
+				ScoredAt:   now,
+			}
+			if result.Level != "healthy" {
+				snap.Breakdown = scoring.BreakdownJSON(result)
+			}
+			snaps[i] = snap
+		}
+	})
+
+	// 并行段结束后单线程合成 map（给故障检测用），O(n) 可忽略
+	cardScores := make(map[string]scoring.CardScore, len(frames))
+	for i, f := range frames {
+		cardScores[f.UUID] = entries[i]
 	}
 
 	// 6. 批量写快照
-	if err := s.health.BatchUpsertSnapshots(snaps); err != nil {
+	if err := s.health.BatchUpsertSnapshotsConcurrent(snaps, 8); err != nil {
 		logger.L.Errorf("写快照失败: %v", err)
 		return err
 	}

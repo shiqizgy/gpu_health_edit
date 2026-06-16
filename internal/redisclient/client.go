@@ -117,7 +117,7 @@ func (c *Client) ReadAllFrames(ctx context.Context) ([]MetricFrame, error) {
 				continue
 			}
 			var f MetricFrame
-			if err := json.Unmarshal([]byte(s), &f); err != nil {
+			if err = json.Unmarshal([]byte(s), &f); err != nil {
 				continue
 			}
 			frames = append(frames, f)
@@ -147,11 +147,14 @@ func (c *Client) ReadFrame(ctx context.Context, uuid string) (*MetricFrame, erro
 // key: gpu:fault:{uuid} → mode 字符串
 const faultKeyPrefix = "gpu:fault:"
 
+// faultInjectTTL 故障注入意图的存活时间：演示用，过期自动清理，避免 key 永久堆积。
+const faultInjectTTL = 6 * time.Hour
+
 func (c *Client) SetFault(ctx context.Context, uuid, mode string) error {
 	if mode == "" || mode == "healthy" {
 		return c.rdb.Del(ctx, faultKeyPrefix+uuid).Err()
 	}
-	return c.rdb.Set(ctx, faultKeyPrefix+uuid, mode, 0).Err()
+	return c.rdb.Set(ctx, faultKeyPrefix+uuid, mode, faultInjectTTL).Err()
 }
 
 func (c *Client) GetFault(ctx context.Context, uuid string) (string, error) {

@@ -12,6 +12,7 @@ import (
 	"github.com/gpu-health/platform/internal/repository"
 	"github.com/gpu-health/platform/internal/service"
 	"github.com/gpu-health/platform/pkg/logger"
+	"github.com/gpu-health/platform/pkg/pool"
 	"github.com/robfig/cron/v3"
 )
 
@@ -46,7 +47,9 @@ func main() {
 
 	strategySvc := service.NewStrategyService(strategyRepo, metricRepo)
 	faultDetectSvc := service.NewFaultDetectService(faultEventRepo, faultRuleRepo, metricRepo, topoRepo)
-	scorer := service.NewScorerService(rc, healthRepo, topoRepo, strategySvc, cfg.Scorer.StrategyCode, faultDetectSvc)
+	scorerPool := pool.New(cfg.Scorer.Workers)
+	defer scorerPool.Close()
+	scorer := service.NewScorerService(rc, healthRepo, topoRepo, strategySvc, cfg.Scorer.StrategyCode, faultDetectSvc, scorerPool)
 
 	if *once {
 		if err := scorer.RunOnce(context.Background()); err != nil {

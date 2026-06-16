@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"sync"
 	"time"
 
 	"github.com/gpu-health/platform/internal/model"
@@ -30,6 +31,41 @@ func (r *HealthRepo) BatchUpsertSnapshots(snaps []model.GPUHealthSnapshot) error
 		Columns:   []clause.Column{{Name: "gpu_uuid"}},
 		DoUpdates: clause.AssignmentColumns([]string{"cluster_id", "strategy_id", "score", "level", "veto", "veto_reason", "breakdown", "scored_at"}),
 	}).CreateInBatches(snaps, 200).Error
+}
+
+// BatchUpsertSnapshotsConcurrent 把快照切成 shards 份并发 upsert。
+// 受 MySQL max_open 限制，shards 建议 <= max_open 的一半（默认 8）。
+func (r *HealthRepo) BatchUpsertSnapshotsConcurrent(snaps []model.GPUHealthSnapshot, shards int) error {
+	if len(snaps) == 0 {
+		return nil
+	}
+	if shards <= 1 || len(snaps) <= 200 {
+		return r.BatchUpsertSnapshots(snaps) // 量小直接走串行
+	}
+	size := (len(snaps) + shards - 1) / shards
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+	for start := 0; start < len(snaps); start += size {
+		end := start + size
+		if end > len(snaps) {
+			end = len(snaps)
+		}
+		chunk := snaps[start:end]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := r.BatchUpsertSnapshots(chunk); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	return firstErr
 }
 
 // GetSnapshot 取单卡快照（详情页）

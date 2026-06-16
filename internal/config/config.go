@@ -8,6 +8,7 @@ import (
 
 // Config 全局配置
 type Config struct {
+	App       App             `yaml:"app"`
 	Server    ServerConfig    `yaml:"server"`
 	MySQL     MySQLConfig     `yaml:"mysql"`
 	Redis     RedisConfig     `yaml:"redis"`
@@ -39,6 +40,7 @@ type RedisConfig struct {
 type ScorerConfig struct {
 	Cron         string `yaml:"cron"`          // 定时表达式，每分钟评分
 	StrategyCode string `yaml:"strategy_code"` // 默认使用的策略代码
+	Workers      int    `yaml:"workers"`       //评分协程池大小，<=0取CPU核数
 }
 
 // SimulatorConfig 仿真服务配置
@@ -84,4 +86,20 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	return &c, nil
+}
+
+type App struct {
+	Roles []string `yaml:"roles"` // 可选: api / loader / scorer
+}
+
+func (a App) Has(role string) bool {
+	if len(a.Roles) == 0 {
+		return true
+	}
+	for _, r := range a.Roles {
+		if r == role {
+			return true
+		}
+	}
+	return false
 }

@@ -1,3 +1,6 @@
+app:
+  roles: []
+
 server:
   addr: ":8080"
   mode: debug   # debug / release
@@ -17,6 +20,7 @@ redis:
 scorer:
   cron: "@every 1m"          # 每分钟评分一次
   strategy_code: "default"   # 默认使用的评分策略
+  workers: 0
 
 simulator:
   clusters: ["clusterA", "clusterB"]
