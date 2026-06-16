@@ -17,6 +17,7 @@ type Client struct{ conn driver.Conn }
 // 成功时返回已就绪的 *Client，失败时返回 nil 和对应的错误。
 
 func New(cfg config.CKConfig) (*Client, error) {
+	//Addr: []string{cfg.Addr}是个字符串切片。这是因为ClickHouse原生支持分布式集群，可以在这里配置多个节点地址
 	conn, err := clickhouse.Open(&clickhouse.Options{
 		Addr: []string{cfg.Addr},
 		Auth: clickhouse.Auth{
@@ -29,9 +30,11 @@ func New(cfg config.CKConfig) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	//使用 Ping 验证真实连通性，并设置了 5 秒超时
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := conn.Ping(ctx); err != nil {
+		_ = conn.Close()
 		return nil, err
 	}
 	return &Client{conn: conn}, nil

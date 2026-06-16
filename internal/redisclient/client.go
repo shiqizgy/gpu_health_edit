@@ -25,12 +25,15 @@ type Client struct {
 
 const metricKeyPrefix = "gpu:metrics:"
 
+// 初始化redis
 func New(cfg config.RedisConfig) (*Client, error) {
+	//初始化了一个结构体对象，配置了地址和密码
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     cfg.Addr,
 		Password: cfg.Password,
 		DB:       cfg.DB,
 	})
+	//给接下来的 Ping 操作设置一个 5 秒的硬性截止时间
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
