@@ -8,6 +8,12 @@ import (
 // MetricRepo 指标定义仓储
 type MetricRepo struct{ db *gorm.DB }
 
+// 详细讲解一下这里，其他的连接数据库的语句类似
+// 入参 db *gorm.DB：接收一个指向GORM连接池的指针。注意：这里必须传指针，因为gorm.DB内部包含连接池状态和锁，如果传值（复制），会导致连接池被复制，引发严重的数据竞态和连接泄漏。
+// 返回值 *MetricRepo：返回一个指向新创建的 MetricRepo 结构体的指针。通常仓储也是指针传递，因为可能包含缓存或配置状态。
+// &MetricRepo{db: db}：这是 Go 的结构体实例化语法。它创建了一个 MetricRepo 对象，并将其内部的 db 字段初始化为传入的 db 指针
+// MetricRepo 必须提前定义好才能构造。
+// 注意：在 Go 中，凡是持有连接池、锁、或需要变更内部状态的结构体，一律返回指针。
 func NewMetricRepo(db *gorm.DB) *MetricRepo { return &MetricRepo{db: db} }
 
 // MetricQuery 指标列表查询条件（分页 + 多条件过滤 + 关键字模糊查找）

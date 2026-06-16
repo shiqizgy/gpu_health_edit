@@ -46,12 +46,13 @@ func main() {
 		}
 	}()
 
-	ck, err := ckclient.New(cfg.CK)
+	ck, err := ckclient.New(cfg.CK) //ckclient.New方法
 	if err != nil {
 		logger.L.Fatalf("连接 ClickHouse 失败: %v", err)
 	}
 	defer ck.Close()
 
+	//调用Setup方法，启动所有服务；如果要上生产，需要补上“优雅退出”
 	r := router.Setup(db, rc, cfg.Assistant, ck, cfg.CK.Table)
 	logger.L.Infof("API 服务启动于 %s", cfg.Server.Addr)
 	if err := r.Run(cfg.Server.Addr); err != nil {

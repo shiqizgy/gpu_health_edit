@@ -12,11 +12,14 @@ import (
 	"gorm.io/gorm"
 )
 
-// Setup 装配所有路由。handler 在这里实例化，依赖通过参数注入，结构清晰。
+// Setup 装配所有路由。handler 在这里实例化，依赖通过参数注入。
 func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantConfig, ck *ckclient.Client, table string) *gin.Engine {
+	//gin.Default() 自动挂载了两个中间件：Logger（记录请求日志）和 Recovery（捕获 panic 返回 500）
 	r := gin.Default()
 
-	// CORS：允许前端 dev server
+	// CORS：允许前端开发服务器（Vite 默认 5173 端口）跨域调用后端 API
+	// 这个配置目前只允许localhost，如果前端部署在独立域名，需要把该域名加入AllowOrigins，或改为AllowOrigins: []string{"*"}（一般不推荐）。
+	// 通常生产环境会用 Nginx 反向代理解决跨域，而不是在代码层开白名单。
 	r.Use(cors.New(cors.Config{
 		AllowOrigins: []string{"http://localhost:5173", "http://127.0.0.1:5173"},
 		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -24,6 +27,7 @@ func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantCon
 	}))
 
 	// 实例化仓储
+	// 每个 NewXxxRepo 都注入 *gorm.DB，它们各自封装了对应数据表的 CRUD 操作。
 	metricRepo := repository.NewMetricRepo(db)
 	strategyRepo := repository.NewStrategyRepo(db)
 	topoRepo := repository.NewTopologyRepo(db)
@@ -32,17 +36,19 @@ func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantCon
 	faultEventRepo := repository.NewFaultEventRepo(db)
 	assistantRepo := repository.NewAssistantRepo(db)
 
-	//实例化 service
+	//实例化 service：把 AI 服务所需的所有依赖一次性注入，生成一个能真正处理业务逻辑的assistantSvc实例
 	assistantSvc := assistant.NewService(assistantCfg, topoRepo, healthRepo, metricRepo, faultRepo, rc, assistantRepo)
 
 	// 实例化 handler
-	dashboardH := handler.NewDashboardHandler(healthRepo)
+	// 这一段是HTTP 处理器层（Handler）装配，把之前实例化的各种仓储（Repository）、服务（Service）和基础设施客户端（Redis/ClickHouse），按照“按需分配、最小依赖”的原则，注入到不同的请求处理器中
+	// 涉及到：只需1个仓储、需要多个仓储、以及多个仓储的情况
+	dashboardH := handler.NewDashboardHandler(healthRepo) //只要健康数据
 	metricH := handler.NewMetricHandler(metricRepo, strategyRepo)
 	strategyH := handler.NewStrategyHandler(strategyRepo, topoRepo)
-	topoH := handler.NewTopologyHandler(topoRepo)
+	topoH := handler.NewTopologyHandler(topoRepo) //只要拓扑数据
 	healthH := handler.NewHealthHandler(healthRepo, metricRepo, faultEventRepo)
 	faultH := handler.NewFaultHandler(faultRepo, rc)
-	faultEventH := handler.NewFaultEventHandler(faultEventRepo)
+	faultEventH := handler.NewFaultEventHandler(faultEventRepo) //只要故障事件
 	assistantH := handler.NewAssistantHandler(assistantSvc, assistantRepo)
 	metricSeriesH := handler.NewMetricSeriesHandler(ck, table, topoRepo, metricRepo)
 
