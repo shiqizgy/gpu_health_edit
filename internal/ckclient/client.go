@@ -83,6 +83,33 @@ func (c *Client) LatestSamples(ctx context.Context, table string, window time.Du
 	return out, rows.Err()
 }
 
+// LatestByGPU 取某张卡(sn+tags)最近窗口内每个指标的最新值。
+// 供 AI 助手按需获取该卡实时指标（替代原先从 Redis 读 frame 的方式）。
+func (c *Client) LatestByGPU(ctx context.Context, table, sn, tags string, window time.Duration) (map[string]float64, error) {
+	q := fmt.Sprintf(`
+		SELECT mib, argMax(value,timestamp) AS value
+		FROM %s
+		WHERE sn = ? AND tags = ?
+		  AND dt >= today()-1
+		  AND timestamp >= now()-INTERVAL %d SECOND
+		GROUP BY mib`, table, int(window.Seconds()))
+	rows, err := c.conn.Query(ctx, q, sn, tags)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]float64{}
+	for rows.Next() {
+		var mib string
+		var v float64
+		if err := rows.Scan(&mib, &v); err != nil {
+			return nil, err
+		}
+		out[mib] = v
+	}
+	return out, rows.Err()
+}
+
 // MetricRow与CK表9列对应
 type MetricRow struct {
 	Timestamp time.Time

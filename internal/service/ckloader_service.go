@@ -37,7 +37,6 @@ type CKLoaderService struct {
 }
 
 // 创建CKLoaderService实例
-
 func NewCKLoaderService(
 	cfg config.CKConfig,
 	ck *ckclient.Client,
@@ -78,18 +77,18 @@ func normalizeMIB(mib string) string { return mib }
 //  返回：成功时返回nil，失败时返回具体错误。
 //  若 CK 近窗口无数据，仅打印警告日志并返回 nil（不视为错误）
 
-func (s *CKLoaderService) LoadOnce(ctx context.Context) error {
+func (s *CKLoaderService) Collect(ctx context.Context) ([]redisclient.MetricFrame, error) {
 	window := time.Duration(s.cfg.WindowSec) * time.Second
 	if window <= 0 {
 		window = 5 * time.Minute
 	}
 	rows, err := s.ck.LatestSamples(ctx, s.cfg.Table, window)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(rows) == 0 {
 		logger.L.Warn("CK 近窗口无数据")
-		return nil
+		return nil, nil
 	}
 
 	type meta struct{ source, sn, ip, tags string }
@@ -134,20 +133,29 @@ func (s *CKLoaderService) LoadOnce(ctx context.Context) error {
 	//同步metric_defination.is_health_key状态
 	s.syncMetricHealthKey(liveKeys)
 
-	// 2) 写Redis（和simulator完全相同的通道）
-	ttl := time.Duration(s.cfg.MetricTTL) * time.Second
-	if ttl <= 0 {
-		ttl = 5 * time.Minute
-	}
+	// 组装 frames 列表返回；写不写 Redis 由调用方决定
 	list := make([]redisclient.MetricFrame, 0, len(frames))
 	for _, f := range frames {
 		list = append(list, *f)
 	}
-	if err := s.redis.WriteFramePipeline(ctx, list, ttl); err != nil {
+	logger.L.Infof("CK 采集完成：%d 张卡", len(list))
+	return list, nil
+}
+
+// LoadOnce 采集后写入 Redis（供独立 cmd/ckloader、拆分部署的 scorer 读取使用）。
+func (s *CKLoaderService) LoadOnce(ctx context.Context) error {
+	list, err := s.Collect(ctx)
+	if err != nil {
 		return err
 	}
-	logger.L.Infof("CK 接入完成：%d 张卡", len(list))
-	return nil
+	if len(list) == 0 {
+		return nil
+	}
+	ttl := time.Duration(s.cfg.MetricTTL) * time.Second
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	return s.redis.WriteFramePipeline(ctx, list, ttl)
 }
 
 // syncMetricHealthKey根据本轮CK实测到的指标，动态调整metric_definition.is_health_key。

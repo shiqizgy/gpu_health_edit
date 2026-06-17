@@ -3,10 +3,12 @@ package assistant
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-json"
-	"github.com/gpu-health/platform/internal/redisclient"
+	"github.com/gpu-health/platform/internal/ckclient"
 	"github.com/gpu-health/platform/internal/repository"
 )
 
@@ -24,7 +26,8 @@ type GPUContextProvider struct {
 	health *repository.HealthRepo
 	metric *repository.MetricRepo
 	fault  *repository.FaultRepo
-	redis  *redisclient.Client
+	ck     *ckclient.Client
+	table  string
 }
 
 func NewGPUContextProvider(
@@ -32,9 +35,10 @@ func NewGPUContextProvider(
 	health *repository.HealthRepo,
 	metric *repository.MetricRepo,
 	fault *repository.FaultRepo,
-	rc *redisclient.Client,
+	ck *ckclient.Client,
+	table string,
 ) *GPUContextProvider {
-	return &GPUContextProvider{topo: topo, health: health, metric: metric, fault: fault, redis: rc}
+	return &GPUContextProvider{topo: topo, health: health, metric: metric, fault: fault, ck: ck, table: table}
 }
 
 // breakdown JSON 的解析结构(对应 scoring.BreakdownJSON 的输出)
@@ -84,8 +88,11 @@ func (p *GPUContextProvider) Build(ctx context.Context, uuid string) (string, er
 	}
 
 	// ---- 4. 实时指标(带正常范围标注) ----
-	frame, _ := p.redis.ReadFrame(ctx, uuid)
-	if frame != nil && len(frame.Metrics) > 0 {
+	var liveMetrics map[string]float64
+	if g, err := p.topo.GetGPUByUUID(uuid); err == nil {
+		liveMetrics, _ = p.ck.LatestByGPU(ctx, p.table, g.SN, strconv.Itoa(g.GPUIndex), 5*time.Minute)
+	}
+	if len(liveMetrics) > 0 {
 		// 取指标定义,用于标注正常范围
 		defs, _ := p.metric.ListHealthKeys()
 		defMap := map[string]string{} // key -> "显示名|单位|正常范围|异常范围"
@@ -97,7 +104,7 @@ func (p *GPUContextProvider) Build(ctx context.Context, uuid string) (string, er
 
 		sb.WriteString("【当前实时指标】\n")
 		var xidValue float64 = -1
-		for key, val := range frame.Metrics {
+		for key, val := range liveMetrics {
 			name := nameMap[key]
 			if name == "" {
 				name = key

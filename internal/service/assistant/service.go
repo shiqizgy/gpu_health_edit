@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gpu-health/platform/internal/ckclient"
 	"github.com/gpu-health/platform/internal/config"
 	"github.com/gpu-health/platform/internal/model"
-	"github.com/gpu-health/platform/internal/redisclient"
 	"github.com/gpu-health/platform/internal/repository"
 )
 
@@ -29,11 +29,12 @@ func NewService(
 	health *repository.HealthRepo,
 	metric *repository.MetricRepo,
 	fault *repository.FaultRepo,
-	rc *redisclient.Client,
+	ck *ckclient.Client,
+	table string,
 	assistantRepo *repository.AssistantRepo,
 ) *Service {
 	llm := NewDeepSeekClient(cfg.BaseURL, cfg.APIKey, cfg.Model, cfg.TimeoutSec)
-	provider := NewGPUContextProvider(topo, health, metric, fault, rc)
+	provider := NewGPUContextProvider(topo, health, metric, fault, ck, table)
 	return &Service{cfg: cfg, llm: llm, provider: provider, repo: assistantRepo}
 }
 

@@ -37,7 +37,7 @@ func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantCon
 	assistantRepo := repository.NewAssistantRepo(db)
 
 	//实例化 service：把 AI 服务所需的所有依赖一次性注入，生成一个能真正处理业务逻辑的assistantSvc实例
-	assistantSvc := assistant.NewService(assistantCfg, topoRepo, healthRepo, metricRepo, faultRepo, rc, assistantRepo)
+	assistantSvc := assistant.NewService(assistantCfg, topoRepo, healthRepo, metricRepo, faultRepo, ck, table, assistantRepo)
 
 	// 实例化 handler
 	// 这一段是HTTP 处理器层（Handler）装配，把之前实例化的各种仓储（Repository）、服务（Service）和基础设施客户端（Redis/ClickHouse），按照“按需分配、最小依赖”的原则，注入到不同的请求处理器中

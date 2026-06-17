@@ -48,7 +48,7 @@ func NewScorerService(
 }
 
 // RunOnce 执行一轮评分。（多策略，优先顺序：卡>集群>默认 解析）
-func (s *ScorerService) RunOnce(ctx context.Context) error {
+func (s *ScorerService) RunOnceWith(ctx context.Context, frames []redisclient.MetricFrame) error {
 	start := time.Now()
 
 	// 1. 取默认策略(兜底)
@@ -58,14 +58,9 @@ func (s *ScorerService) RunOnce(ctx context.Context) error {
 		return err
 	}
 
-	// 2. 从 Redis 读所有卡的最新指标
-	frames, err := s.redis.ReadAllFrames(ctx)
-	if err != nil {
-		logger.L.Errorf("读取 Redis 指标失败: %v", err)
-		return err
-	}
+	// 2. 入参即本轮各卡最新指标（由调用方提供：内存直传或 Redis）
 	if len(frames) == 0 {
-		logger.L.Warn("Redis 中无指标数据，跳过本轮评分")
+		logger.L.Warn("本轮无指标数据，跳过评分")
 		return nil
 	}
 
@@ -176,4 +171,14 @@ func (s *ScorerService) RunOnce(ctx context.Context) error {
 	logger.L.Infof("评分完成：%d 张卡(用到 %d 个非默认策略),耗时 %s",
 		len(snaps), len(compiledCache), time.Since(start))
 	return nil
+}
+
+// RunOnce 从 Redis 读取指标后评分（供独立 cmd/scorer、拆分部署使用）。
+func (s *ScorerService) RunOnce(ctx context.Context) error {
+	frames, err := s.redis.ReadAllFrames(ctx)
+	if err != nil {
+		logger.L.Errorf("读取 Redis 指标失败: %v", err)
+		return err
+	}
+	return s.RunOnceWith(ctx, frames)
 }

@@ -13,8 +13,8 @@ import (
 )
 
 func main() {
-	cfgPath := flag.String("config", "configs/config.yaml", "配置文件路径") //flag包，定义一个名为 "config" 的命令行标志（flag），并绑定一个默认值和帮助信息。部署时需要调整
-	flag.Parse()                                                      //解析命令行参数。这一步必须在定义完所有标志之后、使用标志值之前调用。
+	cfgPath := flag.String("config", "configs/local/config.yaml", "配置文件路径") //flag包，定义一个名为 "config" 的命令行标志（flag），并绑定一个默认值和帮助信息。部署时需要调整
+	flag.Parse()                                                            //解析命令行参数。这一步必须在定义完所有标志之后、使用标志值之前调用。
 
 	cfg, err := config.Load(*cfgPath) //调用load方法，传入之前解析出的配置文件路径
 	if err != nil {
