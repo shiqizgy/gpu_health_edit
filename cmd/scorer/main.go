@@ -17,7 +17,7 @@ import (
 )
 
 func main() {
-	cfgPath := flag.String("config", "configs/config.yaml", "配置文件路径")
+	cfgPath := flag.String("config", "configs/config.yaml", "配置文件路径") ////flag包，定义一个名为 "config" 的命令行标志（flag），并绑定一个默认值和帮助信息。部署时需要调整
 	once := flag.Bool("once", false, "只执行一次(调试用)")
 	flag.Parse()
 
@@ -38,6 +38,7 @@ func main() {
 	}
 	defer rc.Close()
 
+	// 每个 NewXxxRepo 都注入 *gorm.DB，它们各自封装了对应数据表的 CRUD 操作。
 	strategyRepo := repository.NewStrategyRepo(db)
 	metricRepo := repository.NewMetricRepo(db)
 	healthRepo := repository.NewHealthRepo(db)
