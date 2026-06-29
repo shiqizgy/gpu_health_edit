@@ -45,5 +45,5 @@ ck:
   password: "123456"
   table: "gpu_metrics"
   cron: "@every 1m"          # 每分钟写入一次
-  window_sec: 300            #
-  metric_ttl: 300
+  window_sec: 86400            #
+  metric_ttl: 86400

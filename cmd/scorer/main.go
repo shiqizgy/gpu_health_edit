@@ -59,7 +59,8 @@ func main() {
 	}
 
 	// 定时评分
-	c := cron.New()
+	// cron 库是一个功能强大的定时任务调度库
+	c := cron.New() //实例化一个新的调度器对象c。这个c对象是管理所有定时任务的核心。
 	cronExpr := cfg.Scorer.Cron
 	if cronExpr == "" {
 		cronExpr = "@every 1m"

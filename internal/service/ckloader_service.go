@@ -109,6 +109,12 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]redisclient.MetricFram
 		liveKeys[mib] = struct{}{}
 	}
 
+	// 首先统计每个节点实际的 GPU 数量
+	nodeGPUCount := map[string]int{} // sn -> gpu count
+	for _, m := range metas {
+		nodeGPUCount[m.sn]++
+	}
+
 	// 1) 同步拓扑：source→cluster, sn→node, sn:tags→gpu
 	for uuid, m := range metas {
 		clusterID, err := s.ensureCluster(m.source)
@@ -116,7 +122,7 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]redisclient.MetricFram
 			logger.L.Warnf("cluster %s: %v", m.source, err)
 			continue
 		}
-		nodeID, err := s.ensureNode(clusterID, m.sn, m.ip)
+		nodeID, err := s.ensureNode(clusterID, m.sn, m.ip, nodeGPUCount[m.sn])
 		if err != nil {
 			logger.L.Warnf("node %s: %v", m.sn, err)
 			continue
@@ -240,12 +246,17 @@ func (s *CKLoaderService) ensureCluster(source string) (uint64, error) {
 	return c.ID, nil
 }
 
-func (s *CKLoaderService) ensureNode(clusterID uint64, sn, ip string) (uint64, error) {
+func (s *CKLoaderService) ensureNode(clusterID uint64, sn, ip string, gpuCount int) (uint64, error) {
 	if id, ok := s.nodeCache[sn]; ok {
+		// 已缓存但需更新 gpu_count（可能动态变化）
+		s.topo.DB().Model(&model.Node{}).Where("hostname = ?", sn).
+			Update("gpu_count", gpuCount)
 		return id, nil
 	}
-	n := model.Node{ClusterID: clusterID, Hostname: sn, IP: ip, GPUCount: 8}
-	if err := s.topo.DB().Where("hostname = ?", sn).FirstOrCreate(&n).Error; err != nil {
+	n := model.Node{ClusterID: clusterID, Hostname: sn, IP: ip, GPUCount: gpuCount}
+	if err := s.topo.DB().Where("hostname = ?", sn).
+		Assign(map[string]any{"gpu_count": gpuCount, "ip": ip}).
+		FirstOrCreate(&n).Error; err != nil {
 		return 0, err
 	}
 	s.nodeCache[sn] = n.ID
