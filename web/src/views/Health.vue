@@ -202,7 +202,7 @@
       <div class="section-title">参与计算的指标 (默认已加载默认策略的规则,可勾选/调权重)</div>
       <div class="metric-groups">
         <div v-for="(rules, dim) in groupedRules" :key="dim" class="metric-group">
-          <div class="group-title">{{ dimNameMap[dim] }} ({{ rules.filter((r: any) => r.enabled).length }}/{{ rules.length }})</div>
+          <div class="group-title">{{ dimNameMap[dim] }} ({{ rules.filter(r => r.enabled).length }}/{{ rules.length }})</div>
           <div v-for="r in rules" :key="r.metric_key" class="metric-row">
             <n-checkbox
               :checked="r.enabled"
@@ -228,7 +228,7 @@
     </template>
   </n-modal>
 
-  <n-modal v-model:show="showAssign" preset="card":title="assignType === 'cluster' ? '为集群分配评分策略' : '为单卡分配评分策略'" style="width: 480px">
+  <n-modal v-model:show="showAssign" preset="card" :title="assignType === 'cluster' ? '为集群分配评分策略' : '为单卡分配评分策略'" style="width: 480px">
     <div style="margin-bottom: 12px; color: var(--text-1); font-size: 13px;">
       <span v-if="assignType === 'cluster'">
         目标集群: <strong>{{ assignTarget?.cluster_name }}</strong>
@@ -328,7 +328,8 @@
 <script setup lang="ts">
 import { ref, computed, h, onMounted } from "vue";
 import { api } from "@/api";
-import { useMessage, NButton, NInput, NInputNumber, NSwitch, NSelect } from "naive-ui";
+import { useMessage, useDialog, NButton, NInput, NInputNumber, NSwitch, NSelect } from "naive-ui";
+const dialog = useDialog();
 
 const message = useMessage();
 const tab = ref("scores");
@@ -762,21 +763,12 @@ const dimNameMap: Record<string, string> = {
 };
 
 async function openCreateStrategy() {
-  // 加载所有指标定义(用于显示中文名/单位/维度)
-  if (allMetrics.value.length === 0) {
-      try {
-        allMetrics.value = await api.metrics();
-        console.log('成功加载指标定义:', allMetrics.value.length, '个');
-      } catch (error) {
-        console.error('加载指标定义失败:', error);
-        message.error('无法加载指标定义，请刷新页面重试');
-        return;
-      }
-    }
-  // 加载默认策略的规则作为起点
-  let defaultRules: any[] = [];
   try {
+    if (allMetrics.value.length === 0) {
+      allMetrics.value = await api.metrics({ is_health_key: true });
+    }
     const defStrategy = strategies.value.find((s: any) => s.is_default);
+    let defaultRules: any[] = [];
     if (defStrategy) {
       const full = await api.strategy(defStrategy.id);
       defaultRules = (full.rules || []).map((r: any) => ({
@@ -786,22 +778,20 @@ async function openCreateStrategy() {
         curve_params: r.curve_params,
         is_veto: r.is_veto,
         veto_threshold: r.veto_threshold,
-        enabled: true  // 默认全部启用
+        enabled: true
       }));
     }
-  } catch (e) { /* 忽略,允许空起点 */ }
-
-  newStrategy.value = {
-    code: "",
-    name: "",
-    description: "",
-    weight_hardware: 0.45,
-    weight_stability: 0.25,
-    weight_performance: 0.20,
-    weight_environment: 0.10,
-    metricRules: defaultRules
-  };
-  showCreateStrategy.value = true;
+    newStrategy.value = {
+      code: "", name: "", description: "",
+      weight_hardware: 0.45, weight_stability: 0.25,
+      weight_performance: 0.20, weight_environment: 0.10,
+      metricRules: defaultRules
+    };
+    showCreateStrategy.value = true;
+  } catch (e: any) {
+    console.error('打开创建策略失败:', e);
+    message.error('加载数据失败，请刷新后重试');
+  }
 }
 
 // 添加事件处理方法

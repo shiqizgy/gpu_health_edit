@@ -52,7 +52,7 @@ func main() {
 	logger.Init(cfg.Server.Mode == "debug")
 	defer logger.Sync()
 
-	// MySQL：用于写拓扑（cluster / node / gpu_card），不做 AutoMigrate
+	// MySQL：用于写拓扑（cluster/node/gpu_card），不做AutoMigrate
 	// （第二个参数false表示不自动建表，建表交给 server 的 AutoMigrate 流程）
 	db, err := repository.NewDB(cfg.MySQL, false)
 	if err != nil {

@@ -25,13 +25,13 @@ scorer:
     huawei: "default-npu"
   workers: 0
 
-simulator:
-  clusters: ["clusterA", "clusterB"]
-  nodes_per_cluster: 2
-  gpus_per_node: 8
-  node_group: "groupA"
-  fault_rate: 0.125
-  cron: "@every 1m"
+#simulator:
+#  clusters: ["clusterA", "clusterB"]
+#  nodes_per_cluster: 2
+#  gpus_per_node: 8
+#  node_group: "groupA"
+#  fault_rate: 0.125
+#  cron: "@every 1m"
 
 assistant:
   enabled: true              # 开启自动故障修复
