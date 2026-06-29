@@ -37,7 +37,7 @@ import (
 func main() {
 	// -config: 配置文件路径，默认读 configs/config.yaml
 	// -once:   只拉取一轮就退出，适合本地调试 / 验证 CK 连通性
-	cfgPath := flag.String("config", "configs/config.yaml", "配置文件路径")
+	cfgPath := flag.String("config", "configs/local/config.yaml", "配置文件路径")
 	once := flag.Bool("once", false, "只拉一轮(调试用)")
 	flag.Parse()
 

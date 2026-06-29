@@ -102,6 +102,7 @@ export const api = {
   topoGPUs: (nodeId: number) => http.get<any, any>(`/topology/nodes/${nodeId}/gpus`),
   addGPU: (data: any) => http.post<any, any>("/topology/gpus", data),
   setGPUStatus: (uuid: string, status: string) => http.put<any, any>(`/topology/gpus/${uuid}/status`, { status }),
+  topoSearch: (q: string) => http.get<any, any>("/topology/search", { params: { q } }),
 
   // 健康值
   healthClusters: () => http.get<any, any>("/health/clusters"),

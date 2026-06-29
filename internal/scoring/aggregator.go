@@ -18,7 +18,7 @@ type CompiledRule struct {
 // CompiledStrategy 编译后的策略
 type CompiledStrategy struct {
 	StrategyID       uint64
-	DimensionWeights map[string]float64    // 维度权重
+	DimensionWeights map[string]float64      // 维度权重
 	Rules            map[string]CompiledRule // metricKey -> 规则
 }
 
@@ -72,6 +72,10 @@ func Score(metrics map[string]float64, strategy *CompiledStrategy) Result {
 		rule, ok := strategy.Rules[key]
 		if !ok {
 			continue // 该指标不在策略中，跳过
+		}
+		// 特殊值保护
+		if value < 0 {
+			continue
 		}
 
 		// 1. 单指标得分

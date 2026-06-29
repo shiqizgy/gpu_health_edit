@@ -77,7 +77,7 @@ func main() {
 		)
 		scorer = service.NewScorerService(
 			rc, repository.NewHealthRepo(db), repository.NewTopologyRepo(db),
-			strategySvc, cfg.Scorer.StrategyCode, faultDetectSvc, scorerPool,
+			strategySvc, cfg.Scorer.StrategyCode, cfg.Scorer.VendorStrategy, faultDetectSvc, scorerPool,
 		)
 	}
 

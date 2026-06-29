@@ -141,3 +141,5 @@ func (r *MetricRepo) AllDefsMap() (map[string]model.MetricDefinition, error) {
 	}
 	return m, nil
 }
+
+func (r *MetricRepo) DB() *gorm.DB { return r.db }

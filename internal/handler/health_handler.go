@@ -76,3 +76,17 @@ func (h *HealthHandler) GPUDetail(c *gin.Context) {
 		"faults":   faults,
 	})
 }
+
+func (h *HealthHandler) SearchGPUs(c *gin.Context) {
+	keyword := c.Query("q")
+	if keyword == "" {
+		response.BadRequest(c, "搜索关键词不能为空")
+		return
+	}
+	list, err := h.health.SearchSnapshots(keyword, 50)
+	if err != nil {
+		response.ServerError(c, err.Error())
+		return
+	}
+	response.OK(c, list)
+}

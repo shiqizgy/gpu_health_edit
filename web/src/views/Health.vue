@@ -6,6 +6,10 @@
         <div class="toolbar">
           <n-button size="small" @click="loadClusters">刷新</n-button>
           <span class="hint">点击集群行查看该集群内每张 GPU 的评分</span>
+          <n-input-group style="width: 360px; margin-left: auto;">
+            <n-input v-model:value="healthSearchKeyword" placeholder="搜索 GPU（UUID 模糊匹配）" size="small" clearable @clear="clearHealthSearch" />
+            <n-button size="small" type="primary" @click="doHealthSearch">搜索</n-button>
+          </n-input-group>
         </div>
 
         <!-- 集群表格(预聚合,毫秒级) -->
@@ -17,6 +21,21 @@
             :bordered="false"
             size="small"
             :row-props="clusterRowProps"
+          />
+        </div>
+
+        <!-- 搜索结果(独立面板,搜索时显示) -->
+        <div class="panel" v-if="healthSearchResults.length" style="margin-top: 16px">
+          <div class="panel-title">
+            搜索结果（{{ healthSearchResults.length }} 张卡）
+            <n-button size="tiny" style="margin-left:12px" @click="clearHealthSearch">清除</n-button>
+          </div>
+          <n-data-table
+            :columns="gpuCols"
+            :data="healthSearchResults"
+            :bordered="false"
+            size="small"
+            :max-height="440"
           />
         </div>
 
@@ -334,6 +353,29 @@ const levelNames: Record<string, string> = {
   healthy: "健康", sub_healthy: "亚健康", warning: "警告", critical: "严重", failed: "故障"
 };
 
+// ---- 搜索 ----
+const healthSearchKeyword = ref("");
+const healthSearchResults = ref<any[]>([]);
+
+async function doHealthSearch() {
+  const q = healthSearchKeyword.value.trim();
+  if (!q) { message.warning("请输入搜索关键词"); return; }
+  try {
+    const list = await api.healthSearch(q);
+    healthSearchResults.value = list || [];
+    if (!healthSearchResults.value.length) {
+      message.info("未找到匹配的 GPU 评分数据");
+    }
+  } catch (e: any) {
+    message.error(e?.response?.data?.msg || "搜索失败");
+  }
+}
+
+function clearHealthSearch() {
+  healthSearchKeyword.value = "";
+  healthSearchResults.value = [];
+}
+
 const clusterCols = [
   { title: "集群", key: "cluster_name", width: 140 },
   { title: "编号", key: "cluster_code", width: 130,
@@ -347,15 +389,15 @@ const clusterCols = [
   { title: "警告", key: "warning_cnt", width: 70, render: (r: any) => h("span", { style: "color:#eab308" }, r.warning_cnt) },
   { title: "严重", key: "critical_cnt", width: 70, render: (r: any) => h("span", { style: "color:#f97316" }, r.critical_cnt) },
   { title: "故障", key: "failed_cnt", width: 70, render: (r: any) => h("span", { style: "color:#ef4444" }, r.failed_cnt) },
-  { title: "当前评分策略", key: "bound_strategy_id", width: 140,
-    render: (r: any) => {
-      const sid = r.bound_strategy_id;
-      if (!sid) return h("span", { style: "color:var(--text-2);font-size:12px" }, "默认");
-      const s = strategies.value.find((x: any) => x.id === sid);
-      return h("span", { style: "font-size:12px;color:var(--accent)" }, s ? s.name : `策略#${sid}`);
-    }
-  },
-  { title: "评分策略", key: "strategy", width: 160,render: (r: any) => h(NButton, { size: "tiny", onClick: (e: any) => { e.stopPropagation(); openAssignCluster(r); } },() => "分配策略") }
+  //{ title: "当前评分策略", key: "bound_strategy_id", width: 140,
+  //  render: (r: any) => {
+  //    const sid = r.bound_strategy_id;
+  //    if (!sid) return h("span", { style: "color:var(--text-2);font-size:12px" }, "默认");
+  //    const s = strategies.value.find((x: any) => x.id === sid);
+  //    return h("span", { style: "font-size:12px;color:var(--accent)" }, s ? s.name : `策略#${sid}`);
+  //  }
+  //},
+  //{ title: "评分策略", key: "strategy", width: 160,render: (r: any) => h(NButton, { size: "tiny", onClick: (e: any) => { e.stopPropagation(); openAssignCluster(r); } },() => "分配策略") }
 ];
 
 function clusterRowProps(row: any) {

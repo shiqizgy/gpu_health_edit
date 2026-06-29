@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gpu-health/platform/internal/ckclient"
@@ -13,14 +14,17 @@ import (
 	"github.com/gpu-health/platform/pkg/logger"
 )
 
-// 滑动窗口：指标连续 missThreshold 轮未在 CK 出现，才关闭 is_health_key
-// 防止 CK 偶发漏数据导致评分指标抖动
 const missThreshold = 3
 
-//  从ClickHouse加载GPU采样指标，完成两件事：
-//  1. 同步拓扑：根据指标中的source/sn/ip/tags信息，确保MySQL中集群（Cluster）、节点（Node）、GPU卡（GPUCard）记录存在（幂等）；
-//  2. 写入Redis：将指标以MetricFrame形式写入Redis，供评分服务读取。
-//  内部维护clusterCache/nodeCache两级内存缓存，避免每次重复查询数据库。
+// 单位转换表：CK 原始值乘以该系数后，得到评分引擎期望的单位
+var unitConvert = map[string]float64{
+	"DCGM_FI_DEV_THERMAL_VIOLATION":     1e-6, // μs → s
+	"DCGM_FI_DEV_POWER_VIOLATION":       1e-6, // μs → s
+	"DCGM_FI_DEV_LOW_UTIL_VIOLATION":    1e-6, // μs → s
+	"DCGM_FI_DEV_BOARD_LIMIT_VIOLATION": 1e-6,
+	"DCGM_FI_DEV_SYNC_BOOST_VIOLATION":  1e-6,
+	"DCGM_FI_DEV_RELIABILITY_VIOLATION": 1e-6,
+}
 
 type CKLoaderService struct {
 	cfg          config.CKConfig
@@ -29,14 +33,15 @@ type CKLoaderService struct {
 	topo         *repository.TopologyRepo
 	metricRepo   *repository.MetricRepo
 	strategyRepo *repository.StrategyRepo
-	clusterCache map[string]uint64 //source->cluster_id
-	nodeCache    map[string]uint64 //source->node_id
+	clusterCache map[string]uint64
+	nodeCache    map[string]uint64
+	missCount    map[string]int
 
-	//指标动态同步状态
-	missCount map[string]int //metric_key -> 连续未出现轮数
+	// counter 增量计算
+	prevValues  map[string]map[string]float64 // uuid -> metric_key -> 上轮原始值
+	counterKeys map[string]bool               // counter 类型的 metric_key 集合
 }
 
-// 创建CKLoaderService实例
 func NewCKLoaderService(
 	cfg config.CKConfig,
 	ck *ckclient.Client,
@@ -53,29 +58,85 @@ func NewCKLoaderService(
 		strategyRepo: strategyRepo,
 		clusterCache: map[string]uint64{},
 		nodeCache:    map[string]uint64{},
-		missCount:    map[string]int{}}
+		missCount:    map[string]int{},
+		prevValues:   map[string]map[string]float64{},
+	}
 }
 
-// gpuUUID根据设备序列号和标签生成GPU全局唯一标识，格式为"sn:tags"。
-// 该UUID在Redis key、拓扑表、评分快照中作为主键关联使用。
-func gpuUUID(sn, tags string) string {
-	return sn + ":" + tags
-}
+func gpuUUID(sn, tags string) string { return sn + ":" + tags }
 
-// normalizeMIB对MIB指标名称做标准化映射。
-// 当前为占位实现（直接返回原名），若ClickHouse中使用短名，
-// 可在此处添加映射表将短名转为标准名。
 func normalizeMIB(mib string) string { return mib }
 
-//  LoadOnce执行一次完整的CK数据加载流程，包含以下步骤：
-//  1. 从ClickHouse查询最近window时间窗口内的最新采样数据（window由配置WindowSec 决定，默认 5 分钟）；
-//  2. 按GPU UUID 分组，将同一张卡的多个指标合并为一个MetricFrame；
-//  3. 同步拓扑：遍历每张卡，确保对应的Cluster、Node、GPUCard记录在MySQL中存在（不存在则创建），实现动态扩容；
-//  4. 将所有 MetricFrame 批量写入 Redis（Pipeline 模式），带 TTL 防止脏数据堆积。
-//  参数：
-//    - ctx: 上下文，用于控制超时和取消
-//  返回：成功时返回nil，失败时返回具体错误。
-//  若 CK 近窗口无数据，仅打印警告日志并返回 nil（不视为错误）
+// detectVendor 根据指标前缀判断卡的厂商
+func detectVendor(metrics map[string]float64) string {
+	dcgm, npu := 0, 0
+	for key := range metrics {
+		if strings.HasPrefix(key, "DCGM_FI_") {
+			dcgm++
+		}
+		if strings.HasPrefix(key, "npu_chip_") || strings.HasPrefix(key, "container_npu_") {
+			npu++
+		}
+	}
+	if npu > dcgm {
+		return "huawei"
+	}
+	if dcgm > 0 {
+		return "nvidia"
+	}
+	return "unknown"
+}
+
+// loadCounterKeys 从 DB 加载所有 counter 类型的指标 key（启动时 + 定期刷新）
+func (s *CKLoaderService) loadCounterKeys() {
+	var defs []model.MetricDefinition
+	if err := s.metricRepo.DB().Where("metric_type = ?", "counter").Find(&defs).Error; err != nil {
+		logger.L.Warnf("加载 counter 类指标失败: %v", err)
+		return
+	}
+	m := make(map[string]bool, len(defs))
+	for _, d := range defs {
+		m[d.MetricKey] = true
+	}
+	s.counterKeys = m
+}
+
+// applyDelta 对 counter 类指标计算增量，并更新 prevValues
+func (s *CKLoaderService) applyDelta(frames map[string]*redisclient.MetricFrame) {
+	if s.counterKeys == nil || len(s.counterKeys) == 0 {
+		return
+	}
+
+	newPrev := make(map[string]map[string]float64, len(frames))
+	for uuid, f := range frames {
+		prev := s.prevValues[uuid]
+		raw := make(map[string]float64, len(f.Metrics))
+
+		for key, val := range f.Metrics {
+			raw[key] = val // 保存原始值
+
+			if !s.counterKeys[key] {
+				continue
+			}
+
+			if prev != nil {
+				if oldVal, ok := prev[key]; ok {
+					delta := val - oldVal
+					if delta < 0 {
+						delta = 0 // counter 重置保护
+					}
+					f.Metrics[key] = delta
+				} else {
+					f.Metrics[key] = 0
+				}
+			} else {
+				f.Metrics[key] = 0
+			}
+		}
+		newPrev[uuid] = raw
+	}
+	s.prevValues = newPrev
+}
 
 func (s *CKLoaderService) Collect(ctx context.Context) ([]redisclient.MetricFrame, error) {
 	window := time.Duration(s.cfg.WindowSec) * time.Second
@@ -89,6 +150,11 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]redisclient.MetricFram
 	if len(rows) == 0 {
 		logger.L.Warn("CK 近窗口无数据")
 		return nil, nil
+	}
+
+	// 首次或定期刷新 counter keys
+	if s.counterKeys == nil {
+		s.loadCounterKeys()
 	}
 
 	type meta struct{ source, sn, ip, tags string }
@@ -105,17 +171,23 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]redisclient.MetricFram
 			metas[uuid] = meta{r.Source, r.SN, r.IP, r.Tags}
 		}
 		mib := normalizeMIB(r.MIB)
-		f.Metrics[normalizeMIB(r.MIB)] = r.Value
+		val := r.Value
+		if factor, ok := unitConvert[mib]; ok {
+			val *= factor
+		}
+		f.Metrics[mib] = val
 		liveKeys[mib] = struct{}{}
 	}
 
-	// 首先统计每个节点实际的 GPU 数量
-	nodeGPUCount := map[string]int{} // sn -> gpu count
+	// counter 增量计算（在单位转换之后、拓扑同步之前）
+	s.applyDelta(frames)
+
+	nodeGPUCount := map[string]int{}
 	for _, m := range metas {
 		nodeGPUCount[m.sn]++
 	}
 
-	// 1) 同步拓扑：source→cluster, sn→node, sn:tags→gpu
+	// 同步拓扑 + 写入 Vendor
 	for uuid, m := range metas {
 		clusterID, err := s.ensureCluster(m.source)
 		if err != nil {
@@ -128,18 +200,17 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]redisclient.MetricFram
 			continue
 		}
 		idx, _ := strconv.Atoi(m.tags)
+		vendor := detectVendor(frames[uuid].Metrics)
 		if err := s.topo.UpsertGPU(&model.GPUCard{
 			UUID: uuid, NodeID: nodeID, ClusterID: clusterID,
-			GPUIndex: idx, SN: m.sn, Status: "online", // ← 新增 SN: m.sn
+			GPUIndex: idx, SN: m.sn, Status: "online", Vendor: vendor,
 		}); err != nil {
 			logger.L.Warnf("upsert gpu %s: %v", uuid, err)
 		}
 	}
 
-	//同步metric_defination.is_health_key状态
 	s.syncMetricHealthKey(liveKeys)
 
-	// 组装 frames 列表返回；写不写 Redis 由调用方决定
 	list := make([]redisclient.MetricFrame, 0, len(frames))
 	for _, f := range frames {
 		list = append(list, *f)
@@ -148,7 +219,6 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]redisclient.MetricFram
 	return list, nil
 }
 
-// LoadOnce 采集后写入 Redis（供独立 cmd/ckloader、拆分部署的 scorer 读取使用）。
 func (s *CKLoaderService) LoadOnce(ctx context.Context) error {
 	list, err := s.Collect(ctx)
 	if err != nil {
@@ -164,11 +234,6 @@ func (s *CKLoaderService) LoadOnce(ctx context.Context) error {
 	return s.redis.WriteFramePipeline(ctx, list, ttl)
 }
 
-// syncMetricHealthKey根据本轮CK实测到的指标，动态调整metric_definition.is_health_key。
-// 策略：
-//   - liveKeys 中存在 + 已有定义 → is_health_key = true（立即启用）
-//   - 已有定义但不在 liveKeys 中 → missCount[key]++，达到阈值才置 false（抖动保护）
-//   - liveKeys 中存在但无定义 → 仅打日志，不自动创建（缺少 dimension/曲线信息）
 func (s *CKLoaderService) syncMetricHealthKey(liveKeys map[string]struct{}) {
 	definedKeys, err := s.metricRepo.ListAllKeys()
 	if err != nil {
@@ -180,19 +245,16 @@ func (s *CKLoaderService) syncMetricHealthKey(liveKeys map[string]struct{}) {
 		definedSet[k] = struct{}{}
 	}
 
-	// 需要启用评分的指标
 	var enableKeys []string
 	for k := range liveKeys {
 		if _, ok := definedSet[k]; ok {
 			enableKeys = append(enableKeys, k)
-			s.missCount[k] = 0 // 命中即清零
+			s.missCount[k] = 0
 		} else {
-			// CK 出现了未定义的新指标，告警但不自动创建
 			logger.L.Warnf("CK 出现未定义指标 [%s]，请到指标系统补充 dimension 等元数据", k)
 		}
 	}
 
-	// 已定义但本轮未出现的指标：累计 miss 次数
 	var disableKeys []string
 	for _, k := range definedKeys {
 		if _, alive := liveKeys[k]; alive {
@@ -204,7 +266,6 @@ func (s *CKLoaderService) syncMetricHealthKey(liveKeys map[string]struct{}) {
 		}
 	}
 
-	// 批量执行
 	if n, err := s.metricRepo.UpdateHealthKeyByMetricKeys(enableKeys, true); err != nil {
 		logger.L.Warnf("启用指标评分失败: %v", err)
 	} else if n > 0 {
@@ -218,14 +279,12 @@ func (s *CKLoaderService) syncMetricHealthKey(liveKeys map[string]struct{}) {
 		logger.L.Infof("关闭 %d 个指标参与评分(连续 %d 轮未出现): %v",
 			n, missThreshold, disableKeys)
 		s.bumpStrategiesByKeys(disableKeys)
-		// 关闭后清零 missCount，避免恢复出现时误判
 		for _, k := range disableKeys {
 			s.missCount[k] = 0
 		}
 	}
 }
 
-// bumpStrategiesByKeys 让评分服务下轮热加载策略
 func (s *CKLoaderService) bumpStrategiesByKeys(keys []string) {
 	for _, k := range keys {
 		if err := s.strategyRepo.BumpVersionByMetricKey(k); err != nil {
@@ -248,7 +307,6 @@ func (s *CKLoaderService) ensureCluster(source string) (uint64, error) {
 
 func (s *CKLoaderService) ensureNode(clusterID uint64, sn, ip string, gpuCount int) (uint64, error) {
 	if id, ok := s.nodeCache[sn]; ok {
-		// 已缓存但需更新 gpu_count（可能动态变化）
 		s.topo.DB().Model(&model.Node{}).Where("hostname = ?", sn).
 			Update("gpu_count", gpuCount)
 		return id, nil

@@ -79,11 +79,13 @@ func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantCon
 		api.GET("/topology/nodes/:nodeId/gpus", topoH.GPUs)
 		api.POST("/topology/gpus", topoH.AddGPU)                   // 扩容
 		api.PUT("/topology/gpus/:uuid/status", topoH.SetGPUStatus) // 缩容
+		api.GET("/topology/search", topoH.Search)                  //拓扑的GPU卡搜索
 
 		// 健康值
 		api.GET("/health/clusters", healthH.ClusterSummaries)
 		api.GET("/health/clusters/:clusterId/gpus", healthH.ClusterGPUs)
 		api.GET("/health/gpus/:uuid", healthH.GPUDetail)
+		api.GET("/health/search", healthH.SearchGPUs) //健康值搜索
 
 		// 故障知识图谱
 		api.GET("/faults/knowledge", faultH.List)

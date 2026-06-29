@@ -53,6 +53,7 @@ func (r *TopologyRepo) UpsertGPU(g *model.GPUCard) error {
 			"gpu_index":  g.GPUIndex,
 			"model":      g.Model,
 			"status":     g.Status,
+			"vendor":     g.Vendor,
 		}).FirstOrCreate(g).Error
 }
 
@@ -116,6 +117,7 @@ func (r *TopologyRepo) DB() *gorm.DB {
 type GPUWithStrategy struct {
 	UUID              string  `gorm:"column:uuid"`
 	ClusterID         uint64  `gorm:"column:cluster_id"`
+	Vendor            string  `gorm:"column:vendor"`
 	CardStrategyID    *uint64 `gorm:"column:card_strategy_id"`
 	ClusterStrategyID *uint64 `gorm:"column:cluster_strategy_id"`
 }
@@ -158,4 +160,12 @@ func (r *TopologyRepo) GetGPUByUUID(uuid string) (*model.GPUCard, error) {
 		return nil, err
 	}
 	return &g, nil
+}
+
+func (r *TopologyRepo) SearchGPUs(keyword string, limit int) ([]model.GPUCard, error) {
+	var out []model.GPUCard
+	q := "%" + keyword + "%"
+	err := r.db.Where("uuid LIKE ? OR sn LIKE ?", q, q).
+		Limit(limit).Find(&out).Error
+	return out, err
 }

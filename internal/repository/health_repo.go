@@ -208,3 +208,14 @@ func (r *HealthRepo) RecomputeClusterSummaries() error {
 	}
 	return nil
 }
+
+func (r *HealthRepo) SearchSnapshots(keyword string, limit int) ([]SnapshotWithBinding, error) {
+	var out []SnapshotWithBinding
+	q := "%" + keyword + "%"
+	err := r.db.Table("gpu_health_snapshot AS s").
+		Select("s.*, g.strategy_id AS bound_strategy_id").
+		Joins("LEFT JOIN gpu_card g ON g.uuid = s.gpu_uuid").
+		Where("s.gpu_uuid LIKE ?", q).
+		Order("s.score ASC").Limit(limit).Scan(&out).Error
+	return out, err
+}

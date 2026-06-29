@@ -85,3 +85,17 @@ func (h *TopologyHandler) SetGPUStatus(c *gin.Context) {
 	}
 	response.OK(c, nil)
 }
+
+func (h *TopologyHandler) Search(c *gin.Context) {
+	keyword := c.Query("q")
+	if keyword == "" {
+		response.BadRequest(c, "搜索关键词不能为空")
+		return
+	}
+	list, err := h.topo.SearchGPUs(keyword, 50)
+	if err != nil {
+		response.ServerError(c, err.Error())
+		return
+	}
+	response.OK(c, list)
+}
