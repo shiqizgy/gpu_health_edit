@@ -9,8 +9,8 @@ import (
 	"github.com/gpu-health/platform/internal/ckclient"
 	"github.com/gpu-health/platform/internal/config"
 	"github.com/gpu-health/platform/internal/model"
-	"github.com/gpu-health/platform/internal/redisclient"
 	"github.com/gpu-health/platform/internal/repository"
+	"github.com/gpu-health/platform/internal/types"
 	"github.com/gpu-health/platform/pkg/logger"
 )
 
@@ -50,7 +50,6 @@ func NewCKLoaderService(
 	return &CKLoaderService{
 		cfg:          cfg,
 		ck:           ck,
-		redis:        rc,
 		topo:         topo,
 		metricRepo:   metricRepo,
 		strategyRepo: strategyRepo,
@@ -100,7 +99,7 @@ func (s *CKLoaderService) loadCounterKeys() {
 }
 
 // applyDelta 对 counter 类指标计算增量，并更新 prevValues
-func (s *CKLoaderService) applyDelta(frames map[string]*redisclient.MetricFrame) {
+func (s *CKLoaderService) applyDelta(frames map[string]*types.MetricFrame) {
 	if s.counterKeys == nil || len(s.counterKeys) == 0 {
 		return
 	}
@@ -136,7 +135,7 @@ func (s *CKLoaderService) applyDelta(frames map[string]*redisclient.MetricFrame)
 	s.prevValues = newPrev
 }
 
-func (s *CKLoaderService) Collect(ctx context.Context) ([]redisclient.MetricFrame, error) {
+func (s *CKLoaderService) Collect(ctx context.Context) ([]types.MetricFrame, error) {
 	window := time.Duration(s.cfg.WindowSec) * time.Second
 	if window <= 0 {
 		window = 5 * time.Minute
@@ -156,7 +155,7 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]redisclient.MetricFram
 	}
 
 	type meta struct{ source, sn, ip, tags string }
-	frames := map[string]*redisclient.MetricFrame{}
+	frames := map[string]*types.MetricFrame{}
 	metas := map[string]meta{}
 	liveKeys := map[string]struct{}{}
 	now := time.Now().Unix()
@@ -164,7 +163,7 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]redisclient.MetricFram
 		uuid := gpuUUID(r.SN, r.Tags)
 		f, ok := frames[uuid]
 		if !ok {
-			f = &redisclient.MetricFrame{UUID: uuid, TS: now, Metrics: map[string]float64{}}
+			f = &types.MetricFrame{UUID: uuid, TS: now, Metrics: map[string]float64{}}
 			frames[uuid] = f
 			metas[uuid] = meta{r.Source, r.SN, r.IP, r.Tags}
 		}
@@ -209,7 +208,7 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]redisclient.MetricFram
 
 	s.syncMetricHealthKey(liveKeys)
 
-	list := make([]redisclient.MetricFrame, 0, len(frames))
+	list := make([]types.MetricFrame, 0, len(frames))
 	for _, f := range frames {
 		list = append(list, *f)
 	}

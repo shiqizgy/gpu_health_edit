@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/gpu-health/platform/internal/model"
-	"github.com/gpu-health/platform/internal/redisclient"
 	"github.com/gpu-health/platform/internal/repository"
 	"github.com/gpu-health/platform/internal/scoring"
+	"github.com/gpu-health/platform/internal/types"
 	"github.com/gpu-health/platform/pkg/logger"
 	"github.com/gpu-health/platform/pkg/pool"
 )
@@ -46,7 +46,7 @@ func NewScorerService(
 }
 
 // RunOnceWith 执行一轮评分。策略优先级：卡级 > 集群级 > vendor级 > 默认
-func (s *ScorerService) RunOnceWith(ctx context.Context, frames []redisclient.MetricFrame) error {
+func (s *ScorerService) RunOnceWith(ctx context.Context, frames []types.MetricFrame) error {
 	start := time.Now()
 
 	defaultStrategy, err := s.strategy.GetCompiled(s.strategyCode)
