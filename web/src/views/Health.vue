@@ -74,8 +74,27 @@
         </div>
 
         <div class="panel" v-if="editStrategy" style="margin-top: 16px">
-          <div class="panel-title">编辑策略：{{ editStrategy.name }}（版本 {{ editStrategy.version }}）</div>
+          <div class="panel-title">编辑策略：{{ editStrategy.name }}</div>
           <div style="padding: 16px">
+               <!-- 基本信息：名称 / 说明 可修改（代码为标识，只读）-->
+               <div class="basic-info">
+                 <div class="section-title">基本信息</div>
+                 <div class="weights-grid">
+                    <div class="weight-item">
+                       <label>策略代码（只读）</label>
+                       <n-input :value="editStrategy.code" disabled />
+                    </div>
+                    <div class="weight-item">
+                       <label>策略名称</label>
+                          <n-input v-model:value="editStrategy.name" placeholder="如 推理宽松" />
+                    </div>
+                  </div>
+                  <div class="weight-item" style="margin-top:12px">
+                     <label>说明</label>
+                        <n-input v-model:value="editStrategy.description" type="textarea":autosize="{ minRows: 1, maxRows: 3 }" placeholder="策略说明" />
+                  </div>
+               </div>
+
                 <!-- 维度权重输入区域 -->
                 <div class="dimension-weights">
                   <div class="section-title">维度权重设置</div>
@@ -583,10 +602,9 @@ const strategyCols = [
   { title: "名称", key: "name", width: 180 },
   { title: "默认", key: "is_default", width: 70,
     render: (r: any) => r.is_default ? h("span", { style: "color:#38bdf8" }, "✓") : "" },
-  { title: "版本", key: "version", width: 70, render: (r: any) => h("span", { class: "mono" }, r.version) },
   { title: "说明", key: "description" },
   { title: "操作", key: "ops", width: 90,
-    render: (r: any) => h(NButton, { size: "tiny", onClick: () => openEditStrategy(r) }, () => "编辑权重") }
+    render: (r: any) => h(NButton, { size: "tiny", onClick: () => openEditStrategy(r) }, () => "编辑") }
 ];
 
 const curveOptions = [
@@ -682,7 +700,8 @@ async function openEditStrategy(r: any) {
   }
 
   // 新增：拉取全量指标，用于"添加指标"下拉
-  allMetrics.value = await api.metrics({ is_health_key: true });
+  const res = await api.metrics({ is_health_key: true, limit: 200 });
+  allMetrics.value = res.items || [];
 }
 
 async function saveStrategy() {
@@ -763,14 +782,21 @@ const dimNameMap: Record<string, string> = {
 };
 
 async function openCreateStrategy() {
+  console.log('1. openCreateStrategy 开始执行');
   try {
     if (allMetrics.value.length === 0) {
-      allMetrics.value = await api.metrics({ is_health_key: true });
+      console.log('2. 开始加载指标定义');
+      const res = await api.metrics({ is_health_key: true, limit: 200 });
+      allMetrics.value = res.items || [];
+      console.log('3. 指标定义加载完成:', allMetrics.value.length);
     }
     const defStrategy = strategies.value.find((s: any) => s.is_default);
+    console.log('4. 默认策略:', defStrategy);
     let defaultRules: any[] = [];
     if (defStrategy) {
+      console.log('5. 开始加载策略详情');
       const full = await api.strategy(defStrategy.id);
+      console.log('6. 策略详情加载完成:', full);
       defaultRules = (full.rules || []).map((r: any) => ({
         metric_key: r.metric_key,
         weight: r.weight,
@@ -787,12 +813,15 @@ async function openCreateStrategy() {
       weight_performance: 0.20, weight_environment: 0.10,
       metricRules: defaultRules
     };
+    console.log('7. 准备显示弹窗, showCreateStrategy 当前值:', showCreateStrategy.value);
     showCreateStrategy.value = true;
+    console.log('8. showCreateStrategy 已设置为 true');
   } catch (e: any) {
     console.error('打开创建策略失败:', e);
     message.error('加载数据失败，请刷新后重试');
   }
 }
+
 
 // 添加事件处理方法
 function onRuleEnabledChange(ruleKey: string, enabled: boolean) {
@@ -878,7 +907,7 @@ const groupedRules = computed(() => {
   };
 
   //确保数据存在
-  if (!allMetrics.value || allMetrics.value.length === 0) {
+  if (!Array.isArray(allMetrics.value) || allMetrics.value.length === 0) {
     console.warn('指标定义未加载');
     return groups;
   }
@@ -939,6 +968,12 @@ async function deleteStrategy(row: any) {
 .hint { font-size: 12px; color: var(--text-2); }
 .pager { display: flex; justify-content: flex-end; padding: 14px 16px; }
 .rules-title { font-size: 12px; color: var(--text-1); margin: 16px 0 8px; letter-spacing: 0.05em; }
+.basic-info{
+  margin-bottom: 18px;
+  padding: 16px;
+  background: var(--bg-2);
+  border-radius: 6px;
+}
 .dimension-weights {
   margin-bottom: 24px;
   padding: 16px;

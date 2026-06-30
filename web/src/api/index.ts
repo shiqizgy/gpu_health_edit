@@ -109,8 +109,9 @@ export const api = {
   healthClusterGPUs: (clusterId: number, limit = 50, offset = 0) =>
     http.get<any, any>(`/health/clusters/${clusterId}/gpus`, { params: { limit, offset } }),
   healthGPUDetail: (uuid: string) => http.get<any, any>(`/health/gpus/${uuid}`),
+  healthSearch: (q: string) => http.get<any, any>("/health/search", { params: { q } }),
 
-  // 故障知识图谱
+    // 故障知识图谱
   faultKnowledge: (params?: any) => http.get<any, any>("/faults/knowledge", { params }),
   createFault: (data: any) => http.post<any, any>("/faults/knowledge", data),
   updateFault: (id: number, data: any) => http.put<any, any>(`/faults/knowledge/${id}`, data),
