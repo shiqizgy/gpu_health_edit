@@ -7,15 +7,10 @@ server:
 
 mysql:
   # podman 部署时，容器名即主机名；本地直连用 127.0.0.1
-  dsn: "gpuhealth:gpuhealth@tcp(127.0.0.1:3306)/gpu_health?charset=utf8mb4&parseTime=true&loc=Local&collation=utf8mb4_unicode_ci"
+  dsn: "db_write:ys5aG6aYQ1@tcp(write-mysql.test.smartops.jd.local:3358)/db_netops_pre?charset=utf8&parseTime=True&loc=Local&timeout=1000ms"
   max_open: 50
   max_idle: 10
   auto_migrate: true
-
-redis:
-  addr: "127.0.0.1:6379"
-  password: ""
-  db: 0
 
 scorer:
   cron: "@every 1m"
@@ -26,11 +21,13 @@ assistant:
   enabled: false
 
 ck:
-  addr: "ckpub332.olap.jd.com:2000"   # CK地址，Native TCP端口；
-  database: "monitor"                 # 数据库名
-  username: "read_db_monitor"         # 用户名，不确定先用default
-  password: "OvOYQmI39wzWTUsxPs-E"    # 密码，没有则留空
+  addr: ckpub332.olap.jd.com        # CK地址，Native TCP端口；
+  port: 2000                        # 端口
+  database: monitor                 # 数据库名
+  username: read_db_monitor         # 用户名，不确定先用default
+  password: OvOYQmI39wzWTUsxPs-E    # 密码，没有则留空
   table: ""                           # 填写表名
   cron: "@every 1m"
   window_sec: 300
   metric_ttl: 300
+

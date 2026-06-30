@@ -29,7 +29,6 @@ var unitConvert = map[string]float64{
 type CKLoaderService struct {
 	cfg          config.CKConfig
 	ck           *ckclient.Client
-	redis        *redisclient.Client
 	topo         *repository.TopologyRepo
 	metricRepo   *repository.MetricRepo
 	strategyRepo *repository.StrategyRepo
@@ -45,7 +44,6 @@ type CKLoaderService struct {
 func NewCKLoaderService(
 	cfg config.CKConfig,
 	ck *ckclient.Client,
-	rc *redisclient.Client,
 	topo *repository.TopologyRepo,
 	metricRepo *repository.MetricRepo,
 	strategyRepo *repository.StrategyRepo) *CKLoaderService {
@@ -217,21 +215,6 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]redisclient.MetricFram
 	}
 	logger.L.Infof("CK 采集完成：%d 张卡", len(list))
 	return list, nil
-}
-
-func (s *CKLoaderService) LoadOnce(ctx context.Context) error {
-	list, err := s.Collect(ctx)
-	if err != nil {
-		return err
-	}
-	if len(list) == 0 {
-		return nil
-	}
-	ttl := time.Duration(s.cfg.MetricTTL) * time.Second
-	if ttl <= 0 {
-		ttl = 5 * time.Minute
-	}
-	return s.redis.WriteFramePipeline(ctx, list, ttl)
 }
 
 func (s *CKLoaderService) syncMetricHealthKey(liveKeys map[string]struct{}) {

@@ -13,18 +13,16 @@ import (
 )
 
 type ScorerService struct {
-	redis          *redisclient.Client
 	health         *repository.HealthRepo
 	topo           *repository.TopologyRepo
 	strategy       *StrategyService
 	strategyCode   string
-	vendorStrategy map[string]string // vendor -> strategy_code
+	vendorStrategy map[string]string
 	faultDetect    *FaultDetectService
 	pool           *pool.Pool
 }
 
 func NewScorerService(
-	rc *redisclient.Client,
 	health *repository.HealthRepo,
 	topo *repository.TopologyRepo,
 	strategy *StrategyService,
@@ -37,7 +35,6 @@ func NewScorerService(
 		vendorStrategy = map[string]string{}
 	}
 	return &ScorerService{
-		redis:          rc,
 		health:         health,
 		topo:           topo,
 		strategy:       strategy,
@@ -84,7 +81,6 @@ func (s *ScorerService) RunOnceWith(ctx context.Context, frames []redisclient.Me
 		bindOf[g.UUID] = binding{clusterID: g.ClusterID, vendor: g.Vendor, strategyID: sid}
 	}
 
-	// 预编译所有用到的非默认策略（卡级/集群级绑定）
 	compiledCache := map[uint64]*scoring.CompiledStrategy{}
 	for _, b := range bindOf {
 		if b.strategyID == nil {
@@ -101,7 +97,6 @@ func (s *ScorerService) RunOnceWith(ctx context.Context, frames []redisclient.Me
 		compiledCache[*b.strategyID] = cs
 	}
 
-	// 预编译 vendor 级策略
 	vendorCompiled := map[string]*scoring.CompiledStrategy{}
 	for vendor, code := range s.vendorStrategy {
 		cs, err := s.strategy.GetCompiled(code)
@@ -127,7 +122,6 @@ func (s *ScorerService) RunOnceWith(ctx context.Context, frames []redisclient.Me
 						compiled = cs
 					}
 				} else if cs, ok := vendorCompiled[b.vendor]; ok {
-					// vendor 级策略（卡级和集群级都没绑定时生效）
 					compiled = cs
 				}
 			}
@@ -177,13 +171,4 @@ func (s *ScorerService) RunOnceWith(ctx context.Context, frames []redisclient.Me
 	logger.L.Infof("评分完成：%d 张卡(用到 %d 个非默认策略, %d 个vendor策略),耗时 %s",
 		len(snaps), len(compiledCache), len(vendorCompiled), time.Since(start))
 	return nil
-}
-
-func (s *ScorerService) RunOnce(ctx context.Context) error {
-	frames, err := s.redis.ReadAllFrames(ctx)
-	if err != nil {
-		logger.L.Errorf("读取 Redis 指标失败: %v", err)
-		return err
-	}
-	return s.RunOnceWith(ctx, frames)
 }

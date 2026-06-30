@@ -6,14 +6,13 @@ import (
 	"github.com/gpu-health/platform/internal/ckclient"
 	"github.com/gpu-health/platform/internal/config"
 	"github.com/gpu-health/platform/internal/handler"
-	"github.com/gpu-health/platform/internal/redisclient"
 	"github.com/gpu-health/platform/internal/repository"
 	"github.com/gpu-health/platform/internal/service/assistant"
 	"gorm.io/gorm"
 )
 
 // Setup 装配所有路由。handler 在这里实例化，依赖通过参数注入。
-func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantConfig, ck *ckclient.Client, table string) *gin.Engine {
+func Setup(db *gorm.DB, assistantCfg config.AssistantConfig, ck *ckclient.Client, table string) *gin.Engine {
 	//gin.Default() 自动挂载了两个中间件：Logger（记录请求日志）和 Recovery（捕获 panic 返回 500）
 	r := gin.Default()
 
@@ -47,7 +46,7 @@ func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantCon
 	strategyH := handler.NewStrategyHandler(strategyRepo, topoRepo)
 	topoH := handler.NewTopologyHandler(topoRepo) //只要拓扑数据
 	healthH := handler.NewHealthHandler(healthRepo, metricRepo, faultEventRepo)
-	faultH := handler.NewFaultHandler(faultRepo, rc)
+	faultH := handler.NewFaultHandler(faultRepo)
 	faultEventH := handler.NewFaultEventHandler(faultEventRepo) //只要故障事件
 	assistantH := handler.NewAssistantHandler(assistantSvc, assistantRepo)
 	metricSeriesH := handler.NewMetricSeriesHandler(ck, table, topoRepo, metricRepo)
@@ -92,10 +91,6 @@ func Setup(db *gorm.DB, rc *redisclient.Client, assistantCfg config.AssistantCon
 		api.POST("/faults/knowledge", faultH.Create)
 		api.PUT("/faults/knowledge/:id", faultH.Update)
 		api.DELETE("/faults/knowledge/:id", faultH.Delete)
-
-		// 故障注入（演示）
-		api.POST("/faults/inject", faultH.InjectFault)
-		api.GET("/faults/inject", faultH.ListFaults)
 
 		// 故障池（一票否决 / 超阈值 / 命中规则的故障事件）
 		api.GET("/faults/pool", faultEventH.List)
