@@ -33,14 +33,6 @@ services:
       timeout: 5s
       retries: 20
 
-  redis:
-    image: docker.io/library/redis:7-alpine
-    container_name: gpuhealth-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - gpuhealth-redis-data:/data
-
   clickhouse:
     image: docker.io/clickhouse/clickhouse-server:latest
     container_name: gpuhealth-ck
@@ -54,7 +46,4 @@ services:
       nofile: 262144
     volumes:
       - /Users/zhangguiyang.9/myproject/data/gpuhealth_ck_data:/var/lib/clickhouse
-
-volumes:
-  gpuhealth-redis-data:
 

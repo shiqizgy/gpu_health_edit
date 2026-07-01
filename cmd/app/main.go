@@ -21,7 +21,7 @@ import (
 )
 
 func main() {
-	cfgPath := flag.String("config", "configs/pre/config.yaml", "配置文件路径")
+	cfgPath := flag.String("config", "configs/local/config.yaml", "配置文件路径")
 	flag.Parse()
 
 	cfg, err := config.Load(*cfgPath)
