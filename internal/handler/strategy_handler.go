@@ -60,7 +60,7 @@ func (h *StrategyHandler) Create(c *gin.Context) {
 	}
 	s := &model.ScoringStrategy{
 		Code: req.Code, Name: req.Name, Description: req.Description,
-		DimensionWeights: req.DimensionWeights, Version: 1, Rules: req.Rules,
+		DimensionWeights: req.DimensionWeights, Rules: req.Rules,
 	}
 	if err := h.repo.Create(s); err != nil {
 		response.ServerError(c, err.Error())
@@ -102,8 +102,8 @@ func (h *StrategyHandler) UpdateRules(c *gin.Context) {
 	// 添加调试日志
 	log.Printf("接收到 %d 条规则", len(rules))
 	for i, rule := range rules {
-		log.Printf("规则 %d: MetricKey=%s, CurveType=%s, CurveParams=%s",
-			i, rule.MetricKey, rule.CurveType, rule.CurveParams)
+		log.Printf("规则 %d: MetricKey=%s, Weight=%.3f, IsVeto=%v",
+			i, rule.MetricKey, rule.Weight, rule.IsVeto)
 	}
 
 	if err := h.repo.ReplaceRules(id, rules); err != nil {

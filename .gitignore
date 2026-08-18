@@ -1,0 +1,16 @@
+# ===== 前端 =====
+web/node_modules/
+web/dist/
+web/.vite/
+web/*.local
+web/src/**/*.js.map
+web/src/**/*.d.ts
+web/src/**/*.d.ts.map
+
+# ===== 编辑器/IDE =====
+.idea/
+.DS_Store
+
+# ===== Go 构建产物（按需保留）=====
+/bin/
+*.out

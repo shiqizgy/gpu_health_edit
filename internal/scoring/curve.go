@@ -1,130 +1,120 @@
 package scoring
 
-import (
-	"encoding/json"
-	"math"
+import "strings"
+
+// 单指标评分：按 value_type 分派到不同评分方法，统一输出 0-100。
+// 三档固定分：健康 100 / 警告 60 / 故障 20。
+
+// 指标类型（对应metric_definition.value_type，含中文后缀，用前缀匹配）：
+//   Gauge连续数值、Gauge_Rate比率                 → 连续数值，四边界三区间
+//   Counter累计计数、Counter_Duration累计时长、Level_Count水位计数      → 增长速率（数据层转增量），定义正常/告警速率，分三个区间
+//   Bool布尔             → 命中正常值→100，命中异常值→20
+//   Ordinal枚举          → XID/降频掩码等，查表（默认走连续数值兜底或满分）
+//   Other其他            → 版本/字符串类，不参与数值评分
+
+const (
+	ScoreHealthy  = 100.0 // 健康区
+	ScoreWarning  = 60.0  // 警告区
+	ScoreCritical = 20.0  // 故障区
 )
 
-// 曲线引擎：把单个指标的原始测量值映射为 0-100 分。
-// 严格对应项目文档"单指标分数映射"的四种曲线 + none。
+// MetricBounds 单指标评分所需的全部边界（编译策略时从 MetricDefinition 填充）。
+type MetricBounds struct {
+	ValueType int // 原始 value_type（含中文），用前缀判定
 
-// CurveParams 曲线参数（从策略规则的 curve_params JSON 解析）
-type CurveParams struct {
-	Points    [][]float64 `json:"points"`    // piecewise: [[x,score],...]
-	Threshold []float64   `json:"threshold"` // log: [warn, crit]
+	// 连续数值 / 比率：四边界
+	UpperBond    *float64 // 正常上限
+	LowerBound   *float64 // 正常下限
+	WarnupBound  *float64 // 警告上界（超此进故障区）
+	WarnlowBound *float64 // 警告下界（低于此进故障区）
+
+	// 速率型：正常速率上限 / 告警速率上限
+	NormalRate *float64
+	WarnRate   *float64
+
+	// 布尔：正常值 / 异常值（字符串，兼容 "0"/"1"/"OK" 等）
+	BoolNormal   string
+	BoolAbnormal string
 }
 
-// ScoreMetric 根据曲线类型和参数计算单指标得分。
-//   - curveType: piecewise / log / xid_table / veto / none
-//   - rawParams: 策略规则里的 curve_params JSON 字符串
-//   - value: 指标实测值
-func ScoreMetric(curveType, rawParams string, value float64) float64 {
-	switch curveType {
-	case "none":
-		// 利用率类指标：不扣分，恒满分（其健康意义由是否在跑体现，不影响健康度扣分）
-		return 100
-	case "piecewise":
-		p := parseParams(rawParams)
-		return piecewise(p.Points, value)
-	case "log":
-		p := parseParams(rawParams)
-		return logScore(p.Threshold, value)
-	case "xid_table":
-		return xidScore(int(value))
-	case "veto":
-		// veto 曲线本身：触发即 0 分（否决逻辑在聚合层另行处理封顶）
-		if value >= 1 {
-			return 0
+// 指标数值类型码（对应 metric_ordinal.md）
+const (
+	VTGauge     = 1 // Gauge连续数值
+	VTGaugeRate = 2 // Gauge_Rate比率
+	VTCounter   = 3 // Counter累计计数
+	VTDuration  = 4 // Counter_Duration累计时长
+	VTLevel     = 5 // Level_Count水位计数
+	VTBool      = 6 // Bool布尔
+	VTOrdinal   = 7 // Ordinal枚举
+	VTOther     = 8 // Other其他
+)
+
+// ScoreByType 单指标评分统一入口（按 value_type 数值码做计算分支）。
+func ScoreByType(b MetricBounds, value float64) float64 {
+	switch b.ValueType {
+	case VTGauge, VTGaugeRate:
+		return scoreRange(b, value) //todo 调整算法
+	case VTCounter, VTDuration, VTLevel:
+		return scoreRate(b.NormalRate, b.WarnRate, value)
+	case VTBool:
+		return scoreBool(b.BoolNormal, b.BoolAbnormal, value)
+	case VTOrdinal, VTOther:
+		return ScoreHealthy // 枚举/其他：交由专用逻辑(XID查表)或不扣分
+	default: // VTGauge 及未知
+		return scoreRange(b, value)
+	}
+}
+
+// scoreRange 连续数值 / 比率类：四个边界三个区间。
+//
+//	正常：[LowerBound, UpperBond]                                  → 100
+//	警告：[WarnlowBound, LowerBound) 和 (UpperBond, WarnupBound]    → 60
+//	故障：[下限, WarnlowBound) 和 (WarnupBound, 上限]               → 20
+func scoreRange(b MetricBounds, v float64) float64 {
+	if b.UpperBond != nil && v > *b.UpperBond {
+		if b.WarnupBound != nil && v > *b.WarnupBound {
+			return ScoreCritical
 		}
-		return 100
-	default:
-		return 100
+		return ScoreWarning
 	}
-}
-
-// piecewise 分段线性插值。points 按 x 升序，形如 [[0,100],[80,100],[85,90],...]。
-func piecewise(points [][]float64, x float64) float64 {
-	if len(points) == 0 {
-		return 100
-	}
-	if x <= points[0][0] {
-		return points[0][1]
-	}
-	if x >= points[len(points)-1][0] {
-		return points[len(points)-1][1]
-	}
-	for i := 0; i < len(points)-1; i++ {
-		x0, y0 := points[i][0], points[i][1]
-		x1, y1 := points[i+1][0], points[i+1][1]
-		if x >= x0 && x <= x1 {
-			if x1 == x0 {
-				return y0
-			}
-			t := (x - x0) / (x1 - x0)
-			return y0 + (y1-y0)*t
+	if b.LowerBound != nil && v < *b.LowerBound {
+		if b.WarnlowBound != nil && v < *b.WarnlowBound {
+			return ScoreCritical
 		}
+		return ScoreWarning
 	}
-	return 100
+	return ScoreHealthy
 }
 
-// logScore 对数插值。<=warn 给 100，>=crit 给 0，中间按对数刻度。
-// 适合累计错误计数器：偶尔几次没事，几百次才严重。
-func logScore(threshold []float64, value float64) float64 {
-	if len(threshold) < 2 {
-		return 100
+// scoreRate 累计类增长速率(数据层已转采样窗口增量)：三档。
+func scoreRate(normalRate, warnRate *float64, v float64) float64 {
+	if normalRate != nil && v > *normalRate {
+		if warnRate != nil && v > *warnRate {
+			return ScoreCritical
+		}
+		return ScoreWarning
 	}
-	warn, crit := threshold[0], threshold[1]
-	if value <= warn {
-		return 100
-	}
-	if value >= crit {
-		return 0
-	}
-	if warn <= 0 {
-		warn = 1
-	}
-	if value <= 0 {
-		value = 1
-	}
-	ratio := math.Log(value/warn) / math.Log(crit/warn)
-	return 100 - 100*ratio
+	return ScoreHealthy
 }
 
-// XID 错误码分级（与项目文档一致）。
-var xidFatalSet = map[int]bool{
-	48: true, 62: true, 64: true, 69: true, 74: true, 79: true, 95: true,
-	110: true, 119: true, 120: true, 123: true, 140: true, 143: true,
-	154: true, 167: true, 169: true, 171: true, 172: true,
+// scoreBool 布尔：命中正常值→100，命中异常值→20，无法判定→不扣分。
+func scoreBool(normal, abnormal string, v float64) float64 {
+	cur := boolToken(v)
+	if abnormal != "" && cur == strings.TrimSpace(abnormal) {
+		return ScoreCritical
+	}
+	if normal != "" && cur == strings.TrimSpace(normal) {
+		return ScoreHealthy
+	}
+	return ScoreHealthy
 }
 
-var xidWarnSet = map[int]bool{
-	13: true, 31: true, 32: true, 43: true, 44: true, 45: true,
-	61: true, 63: true, 68: true, 78: true, 80: true, 92: true,
-	93: true, 94: true, 109: true, 137: true,
-}
-
-// xidScore：0→100；warn 集→50；fatal 集→0（并在聚合层触发否决）；其他→80。
-func xidScore(code int) float64 {
-	if code == 0 {
-		return 100
+func boolToken(v float64) string {
+	if v == 0 {
+		return "0"
 	}
-	if xidFatalSet[code] {
-		return 0
+	if v == 1 {
+		return "1"
 	}
-	if xidWarnSet[code] {
-		return 50
-	}
-	return 80
-}
-
-// XIDIsFatal 供聚合层判断 XID 是否致命（一票否决）。
-func XIDIsFatal(code int) bool { return xidFatalSet[code] }
-
-func parseParams(raw string) CurveParams {
-	var p CurveParams
-	if raw == "" {
-		return p
-	}
-	_ = json.Unmarshal([]byte(raw), &p)
-	return p
+	return strings.TrimSpace(itoa(int(v)))
 }

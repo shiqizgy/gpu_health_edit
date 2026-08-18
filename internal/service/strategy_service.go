@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gpu-health/platform/internal/model"
 	"github.com/gpu-health/platform/internal/repository"
@@ -22,40 +23,51 @@ type StrategyService struct {
 }
 
 type cachedStrategy struct {
-	version  int64
-	compiled atomic.Pointer[scoring.CompiledStrategy]
+	updatedAt time.Time
+	compiled  atomic.Pointer[scoring.CompiledStrategy]
 }
 
 func NewStrategyService(repo *repository.StrategyRepo, mRepo *repository.MetricRepo) *StrategyService {
 	return &StrategyService{repo: repo, mRepo: mRepo}
 }
 
-// Compile 把数据库策略编译成评分引擎结构。
+// Compile 把数据库评分策略编译成评分引擎结构。
 func (s *StrategyService) Compile(strategy *model.ScoringStrategy) (*scoring.CompiledStrategy, error) {
 	// 解析维度权重
 	dimWeights := map[string]float64{}
 	if err := json.Unmarshal([]byte(strategy.DimensionWeights), &dimWeights); err != nil {
 		return nil, err
-	}
+	} //解析维度权重的json数据
 
 	// 需要知道每个指标属于哪个维度 → 查指标定义
+	// 需要每个指标的维度 + 评分边界 → 查指标定义
 	metrics, err := s.mRepo.ListHealthKeys()
 	if err != nil {
 		return nil, err
 	}
-	dimOf := map[string]string{}
+	defOf := map[string]model.MetricDefinition{}
 	for _, m := range metrics {
-		dimOf[m.MetricKey] = m.Dimension
+		defOf[m.MetricName] = m
 	}
 
 	rules := map[string]scoring.CompiledRule{}
 	for _, rule := range strategy.Rules {
+		def := defOf[rule.MetricKey]
 		rules[rule.MetricKey] = scoring.CompiledRule{
-			MetricKey:     rule.MetricKey,
-			Dimension:     dimOf[rule.MetricKey],
-			Weight:        rule.Weight,
-			CurveType:     rule.CurveType,
-			CurveParams:   rule.CurveParams,
+			MetricKey: rule.MetricKey,
+			Dimension: def.Dimension,
+			Weight:    rule.Weight,
+			Bounds: scoring.MetricBounds{
+				ValueType:    def.ValueType,
+				UpperBond:    def.UpperBond,
+				LowerBound:   def.LowerBound,
+				WarnupBound:  def.WarnupBound,
+				WarnlowBound: def.WarnlowBound,
+				NormalRate:   def.NormalRate,
+				WarnRate:     def.WarnRate,
+				BoolNormal:   def.BoolNormal,
+				BoolAbnormal: def.BoolAbnormal,
+			},
 			IsVeto:        rule.IsVeto,
 			VetoThreshold: rule.VetoThreshold,
 		}
@@ -70,7 +82,7 @@ func (s *StrategyService) Compile(strategy *model.ScoringStrategy) (*scoring.Com
 
 // GetCompiled 获取编译后的策略（带热加载：版本变了自动重编译）。
 func (s *StrategyService) GetCompiled(code string) (*scoring.CompiledStrategy, error) {
-	strategy, err := s.repo.GetByCode(code)
+	strategy, err := s.repo.GetByCode(code) //
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +90,7 @@ func (s *StrategyService) GetCompiled(code string) (*scoring.CompiledStrategy, e
 	v, ok := s.cache.Load(code)
 	if ok {
 		cs := v.(*cachedStrategy)
-		if cs.version == strategy.Version {
+		if cs.updatedAt.Equal(strategy.UpdatedAt) {
 			if c := cs.compiled.Load(); c != nil {
 				return c, nil // 命中缓存
 			}
@@ -90,10 +102,10 @@ func (s *StrategyService) GetCompiled(code string) (*scoring.CompiledStrategy, e
 	if err != nil {
 		return nil, err
 	}
-	cs := &cachedStrategy{version: strategy.Version}
+	cs := &cachedStrategy{updatedAt: strategy.UpdatedAt}
 	cs.compiled.Store(compiled)
 	s.cache.Store(code, cs)
-	logger.L.Infof("策略 %s 已编译/重载，版本=%d，规则数=%d", code, strategy.Version, len(compiled.Rules))
+	logger.L.Infof("策略 %s 已编译/重载，版本=%d，规则数=%d", code, strategy.UpdatedAt, len(compiled.Rules))
 	return compiled, nil
 }
 

@@ -10,8 +10,6 @@ type TopologyRepo struct{ db *gorm.DB }
 
 func NewTopologyRepo(db *gorm.DB) *TopologyRepo { return &TopologyRepo{db: db} }
 
-// ---- 集群 ----
-
 func (r *TopologyRepo) ListClusters() ([]model.Cluster, error) {
 	var out []model.Cluster
 	err := r.db.Order("id").Find(&out).Error
@@ -20,9 +18,7 @@ func (r *TopologyRepo) ListClusters() ([]model.Cluster, error) {
 
 func (r *TopologyRepo) CreateCluster(c *model.Cluster) error { return r.db.Create(c).Error }
 
-// ---- 节点 ----
 // ListNodesByCluster 列出某集群下的节点（拓扑展开子层用）
-
 func (r *TopologyRepo) ListNodesByCluster(clusterID uint64) ([]model.Node, error) {
 	var out []model.Node
 	err := r.db.Where("cluster_id = ?", clusterID).Order("id").Find(&out).Error
@@ -31,9 +27,7 @@ func (r *TopologyRepo) ListNodesByCluster(clusterID uint64) ([]model.Node, error
 
 func (r *TopologyRepo) CreateNode(n *model.Node) error { return r.db.Create(n).Error }
 
-// ---- GPU 卡 ----
 // ListGPUsByNode 列出某节点下的 GPU（拓扑叶子层）
-
 func (r *TopologyRepo) ListGPUsByNode(nodeID uint64) ([]model.GPUCard, error) {
 	var out []model.GPUCard
 	err := r.db.Where("node_id = ?", nodeID).Order("gpu_index").Find(&out).Error
@@ -59,6 +53,7 @@ func (r *TopologyRepo) UpsertGPU(g *model.GPUCard) error {
 			"gpu_index":  g.GPUIndex,
 			"model":      g.Model,
 			"status":     g.Status,
+			"vendor":     g.Vendor,
 		}).FirstOrCreate(g).Error
 }
 
@@ -82,6 +77,38 @@ func (r *TopologyRepo) AllOnlineGPUs() ([]model.GPUCard, error) {
 	return out, err
 }
 
+// GPUMeta 给故障池用：uuid -> 节点主机名 + 集群名 + 集群ID
+type GPUMeta struct {
+	NodeHost    string
+	ClusterName string
+	ClusterID   uint64
+}
+
+// GPUMetaMap 返回所有在线 GPU 的 uuid -> {节点主机名, 集群名, 集群ID} 映射。
+func (r *TopologyRepo) GPUMetaMap() (map[string]GPUMeta, error) {
+	type row struct {
+		UUID        string `gorm:"column:uuid"`
+		NodeHost    string `gorm:"column:node_host"`
+		ClusterName string `gorm:"column:cluster_name"`
+		ClusterID   uint64 `gorm:"column:cluster_id"`
+	}
+	var rows []row
+	err := r.db.Table("gpu_card AS g").
+		Select("g.uuid, n.hostname AS node_host, c.name AS cluster_name, g.cluster_id").
+		Joins("JOIN node n ON n.id = g.node_id").
+		Joins("JOIN cluster c ON c.id = g.cluster_id").
+		Where("g.status = ?", "online").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]GPUMeta, len(rows))
+	for _, x := range rows {
+		m[x.UUID] = GPUMeta{NodeHost: x.NodeHost, ClusterName: x.ClusterName, ClusterID: x.ClusterID}
+	}
+	return m, nil
+}
+
 func (r *TopologyRepo) DB() *gorm.DB {
 	return r.db
 }
@@ -90,6 +117,7 @@ func (r *TopologyRepo) DB() *gorm.DB {
 type GPUWithStrategy struct {
 	UUID              string  `gorm:"column:uuid"`
 	ClusterID         uint64  `gorm:"column:cluster_id"`
+	Vendor            string  `gorm:"column:vendor"`
 	CardStrategyID    *uint64 `gorm:"column:card_strategy_id"`
 	ClusterStrategyID *uint64 `gorm:"column:cluster_strategy_id"`
 }
@@ -122,4 +150,46 @@ func (r *TopologyRepo) CountStrategyUsage(strategyID uint64) (clusterCnt, gpuCnt
 	r.db.Model(&model.Cluster{}).Where("strategy_id = ?", strategyID).Count(&clusterCnt)
 	r.db.Model(&model.GPUCard{}).Where("strategy_id = ?", strategyID).Count(&gpuCnt)
 	return
+}
+
+// GetGPUByUUID 根据 UUID 查询单张 GPU 卡
+func (r *TopologyRepo) GetGPUByUUID(uuid string) (*model.GPUCard, error) {
+	var g model.GPUCard
+	err := r.db.Where("uuid = ?", uuid).First(&g).Error
+	if err != nil {
+		return nil, err
+	}
+	return &g, nil
+}
+
+func (r *TopologyRepo) SearchGPUs(keyword string, limit int) ([]model.GPUCard, error) {
+	var out []model.GPUCard
+	q := "%" + keyword + "%"
+	err := r.db.Where("uuid LIKE ? OR sn LIKE ?", q, q).
+		Limit(limit).Find(&out).Error
+	return out, err
+}
+
+// GPUDetailMeta 单卡详情页头部信息
+type GPUDetailMeta struct {
+	ClusterName string `gorm:"column:cluster_name"`
+	NodeIP      string `gorm:"column:node_ip"`
+	GPUIndex    int    `gorm:"column:gpu_index"`
+	Model       string `gorm:"column:model"`
+	SN          string `gorm:"column:sn"`
+}
+
+// GetGPUDetailMeta 按 uuid 关联查 集群名/节点IP/卡序号/型号/SN
+func (r *TopologyRepo) GetGPUDetailMeta(uuid string) (*GPUDetailMeta, error) {
+	var m GPUDetailMeta
+	err := r.db.Table("gpu_card AS g").
+		Select("c.name AS cluster_name, n.ip AS node_ip, g.gpu_index AS gpu_index, g.model AS model, g.sn AS sn").
+		Joins("JOIN node n ON n.id = g.node_id").
+		Joins("JOIN cluster c ON c.id = g.cluster_id").
+		Where("g.uuid = ?", uuid).
+		Scan(&m).Error
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
 }

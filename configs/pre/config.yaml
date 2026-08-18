@@ -1,0 +1,43 @@
+app:
+  roles: []
+
+server:
+  addr: ":8080"
+  mode: release
+
+mysql:
+  # podman 部署时，容器名即主机名；本地直连用 127.0.0.1
+  dsn: "db_write:ys5aG6aYQ1@tcp(write-mysql.test.smartops.jd.local:3358)/gpu_health?charset=utf8&parseTime=True&loc=Local&timeout=1000ms"
+  max_open: 50
+  max_idle: 10
+  auto_migrate: false
+
+scorer:
+  cron: "@every 1m"
+  strategy_code: "default"
+  vendor_strategy:
+    nvidia: "default"
+    huawei: "default-npu"
+  workers: 0
+
+assistant:
+  enabled: false
+
+ck:
+  addr: ckpub332.olap.jd.com:2000   # CK地址，端口；
+  database: monitor                 # 数据库名
+  username: read_db_monitor         # 用户名
+  password: OvOYQmI39wzWTUsxPs-E    # 密码，没有则留空
+  table: monitor_gpu_all_metric_dist  # 填写表名
+  cron: "@every 1m"
+  window_sec: 300
+  metric_ttl: 300
+  source: "jiushu"       # 只采集 jiushu 集群
+  gpu_limit: 64          # 随机抽样 64 张卡
+
+retention:
+  enabled: true
+  cron: "0 3 * * *"      # 5段格式(分 时 日 月 周)：每天 3:00，
+  retain_days: 3         # 只保留最近3天
+  batch_size: 1000
+

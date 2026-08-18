@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"github.com/gpu-health/platform/internal/model"
 	"gorm.io/gorm"
 )
@@ -17,7 +19,7 @@ func (r *StrategyRepo) List() ([]model.ScoringStrategy, error) {
 	return out, err
 }
 
-// GetByCode 按代码取策略（含规则），评分服务用
+// GetByCode 按策略码取对应策略（含规则），评分服务用
 func (r *StrategyRepo) GetByCode(code string) (*model.ScoringStrategy, error) {
 	var s model.ScoringStrategy
 	err := r.db.Preload("Rules").Where("code = ?", code).First(&s).Error
@@ -40,7 +42,25 @@ func (r *StrategyRepo) GetDefault() (*model.ScoringStrategy, error) {
 
 // Create 新建策略（含规则），用事务保证一致性
 func (r *StrategyRepo) Create(s *model.ScoringStrategy) error {
-	return r.db.Create(s).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		// 若 rules 为空,自动复制默认策略的规则作为起点
+		if len(s.Rules) == 0 {
+			var defaultStrategy model.ScoringStrategy
+			if err := tx.Preload("Rules").Where("is_default = ?", true).First(&defaultStrategy).Error; err == nil {
+				for _, r := range defaultStrategy.Rules {
+					s.Rules = append(s.Rules, model.StrategyMetricRule{
+						MetricKey:     r.MetricKey,
+						Weight:        r.Weight,
+						IsVeto:        r.IsVeto,
+						VetoThreshold: r.VetoThreshold,
+					})
+				}
+			}
+		} else {
+			//处理传入的规则
+		}
+		return tx.Create(s).Error
+	})
 }
 
 // UpdateMeta 更新策略基本信息 + 维度权重，并把 version+1 触发评分服务热加载
@@ -49,7 +69,6 @@ func (r *StrategyRepo) UpdateMeta(id uint64, name, desc, dimWeights string) erro
 		"name":              name,
 		"description":       desc,
 		"dimension_weights": dimWeights,
-		"version":           gorm.Expr("version + 1"),
 	}).Error
 }
 
@@ -61,10 +80,6 @@ func (r *StrategyRepo) ReplaceRules(strategyID uint64, rules []model.StrategyMet
 		}
 		for i := range rules {
 			rules[i].StrategyID = strategyID
-			// 修复：确保curve_params不为空字符串
-			if rules[i].CurveParams == "" {
-				rules[i].CurveParams = "null" // 或者使用sql.NullString
-			}
 		}
 		if len(rules) > 0 {
 			if err := tx.Create(&rules).Error; err != nil {
@@ -73,7 +88,7 @@ func (r *StrategyRepo) ReplaceRules(strategyID uint64, rules []model.StrategyMet
 		}
 		// 规则变了也要 version+1
 		return tx.Model(&model.ScoringStrategy{ID: strategyID}).
-			Update("version", gorm.Expr("version + 1")).Error
+			Update("updated_at", time.Now()).Error
 	})
 }
 
@@ -84,4 +99,34 @@ func (r *StrategyRepo) Delete(id uint64) error {
 		}
 		return tx.Delete(&model.ScoringStrategy{}, id).Error
 	})
+}
+
+// BumpVersionByMetricKey 将所有包含指定指标的策略 version+1。
+// 指标维度变更后调用，让评分服务在下一轮自动热加载。
+//func (r *StrategyRepo) BumpVersionByMetricKey(metricKey string) error {
+//	// 找出所有包含该指标的 strategy_id
+//	var strategyIDs []uint64
+//	err := r.db.Model(&model.StrategyMetricRule{}).
+//		Where("metric_key = ?", metricKey).
+//		Pluck("strategy_id", &strategyIDs).Error
+//	if err != nil || len(strategyIDs) == 0 {
+//		return err
+//	}
+//	// 批量 version+1
+//	return r.db.Model(&model.ScoringStrategy{}).
+//		Where("id IN ?", strategyIDs).
+//		Update("version", gorm.Expr("version + 1")).Error
+//}
+
+// TouchByMetricKey 触发所有包含指定指标的策略重新热加载（刷 updated_at）
+func (r *StrategyRepo) TouchByMetricKey(metricKey string) error {
+	var strategyIDs []uint64
+	if err := r.db.Model(&model.StrategyMetricRule{}).
+		Where("metric_key = ?", metricKey).
+		Pluck("strategy_id", &strategyIDs).Error; err != nil || len(strategyIDs) == 0 {
+		return err
+	}
+	return r.db.Model(&model.ScoringStrategy{}).
+		Where("id IN ?", strategyIDs).
+		Update("updated_at", time.Now()).Error
 }

@@ -43,14 +43,17 @@ const router = useRouter();
 const route = useRoute();
 
 const activeKey = computed(() => String(route.name || "dashboard"));
-const expandedKeys = ref<string[]>(["assess", "fault"]);
+const expandedKeys = ref<string[]>(["metric-sys", "assess", "fault"]);
 
 const titleMap: Record<string, string> = {
   dashboard: "健康大盘",
-  metrics: "指标系统",
+  "metrics-dcgm": "DCGM 指标",
+  "metrics-npu": "NPU 指标",
   topology: "集群拓扑",
   health: "健康值",
+  "gpu-detail": "GPU 健康详情",
   "fault-knowledge": "故障知识图谱",
+  "fault-pool": "故障池",
   "fault-predict": "故障预测",
   "fault-rca": "故障根因分析",
   "fault-assistant": "AI 故障分析助手",
@@ -60,7 +63,13 @@ const currentTitle = computed(() => titleMap[activeKey.value] || "");
 
 const menuOptions = [
   { label: "健康大盘", key: "dashboard" },
-  { label: "指标系统", key: "metrics" },
+  {
+    label: "指标管理", key: "metric-sys",
+    children: [
+      { label: "DCGM 指标", key: "metrics-dcgm" },
+      { label: "NPU 指标", key: "metrics-npu" }
+    ]
+  },
   {
     label: "健康评估", key: "assess",
     children: [
@@ -72,6 +81,7 @@ const menuOptions = [
     label: "GPU 故障", key: "fault",
     children: [
       { label: "故障知识图谱", key: "fault-knowledge" },
+      { label: "故障池", key: "fault-pool" },
       { label: "故障预测", key: "fault-predict" },
       { label: "故障根因分析", key: "fault-rca" },
       { label: "AI 故障分析助手", key: "fault-assistant" }
@@ -82,6 +92,7 @@ const menuOptions = [
 
 function onNav(key: string) {
   // 只有叶子节点才跳转
+  console.log("onNav triggered, key =", key);   // 临时调试
   if (titleMap[key]) router.push({ name: key });
 }
 

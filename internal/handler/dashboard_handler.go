@@ -23,6 +23,7 @@ func (h *DashboardHandler) Overview(c *gin.Context) {
 		return
 	}
 	riskN, _ := strconv.Atoi(c.DefaultQuery("risk_n", "10"))
+
 	riskiest, err := h.health.ListRiskiest(riskN)
 	if err != nil {
 		response.ServerError(c, err.Error())

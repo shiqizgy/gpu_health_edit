@@ -26,21 +26,24 @@ services:
     ports:
       - "3306:3306"
     volumes:
-      - gpuhealth-mysql-data:/var/lib/mysql
+      - /Users/zhangguiyang.9/myproject/data/gpu_index_data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpass"]
       interval: 5s
       timeout: 5s
       retries: 20
 
-  redis:
-    image: docker.io/library/redis:7-alpine
-    container_name: gpuhealth-redis
+  clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:latest
+    container_name: gpuhealth-ck
     ports:
-      - "6379:6379"
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: "123456"
+    ulimits:
+      nofile: 262144
     volumes:
-      - gpuhealth-redis-data:/data
+      - /Users/zhangguiyang.9/myproject/data/gpuhealth_ck_data:/var/lib/clickhouse
 
-volumes:
-  gpuhealth-mysql-data:
-  gpuhealth-redis-data:

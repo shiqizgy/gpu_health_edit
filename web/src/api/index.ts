@@ -5,7 +5,7 @@ const http = axios.create({ baseURL: "/api/v1", timeout: 15000 });
 // AI 助手 SSE 流式对话(axios 不支持流式,用原生 fetch + ReadableStream)
 // onEvent(eventType, data) 会在每收到一个 SSE 事件时被调用
 export async function assistantChatStream(
-    payload: { uuid: string; message: string; history: any[] },
+    payload: { conversation_id: number; uuid: string; message: string },
     onEvent: (eventType: string, data: string) => void,
     signal?: AbortSignal
 ): Promise<void> {
@@ -102,14 +102,21 @@ export const api = {
   topoGPUs: (nodeId: number) => http.get<any, any>(`/topology/nodes/${nodeId}/gpus`),
   addGPU: (data: any) => http.post<any, any>("/topology/gpus", data),
   setGPUStatus: (uuid: string, status: string) => http.put<any, any>(`/topology/gpus/${uuid}/status`, { status }),
+  topoSearch: (q: string) => http.get<any, any>("/topology/search", { params: { q } }),
 
   // 健康值
   healthClusters: () => http.get<any, any>("/health/clusters"),
   healthClusterGPUs: (clusterId: number, limit = 50, offset = 0) =>
     http.get<any, any>(`/health/clusters/${clusterId}/gpus`, { params: { limit, offset } }),
   healthGPUDetail: (uuid: string) => http.get<any, any>(`/health/gpus/${uuid}`),
+  healthSearch: (q: string) => http.get<any, any>("/health/search", { params: { q } }),
+  healthScoreTrend: (uuid: string, params: { from: string; to: string; max_points?: number }) =>
+      http.get<any, any>(`/health/gpus/${uuid}/score-trend`, { params }),
+  healthGPUMetrics: (uuid: string, params: { metrics: string; from: string; to: string; max_points?: number }) =>
+      http.get<any, any>(`/health/gpus/${uuid}/metrics`, { params }),
 
-  // 故障知识图谱
+
+    // 故障知识图谱
   faultKnowledge: (params?: any) => http.get<any, any>("/faults/knowledge", { params }),
   createFault: (data: any) => http.post<any, any>("/faults/knowledge", data),
   updateFault: (id: number, data: any) => http.put<any, any>(`/faults/knowledge/${id}`, data),
@@ -117,5 +124,17 @@ export const api = {
 
   // 故障注入（演示）
   injectFault: (uuid: string, mode: string) => http.post<any, any>("/faults/inject", { uuid, mode }),
-  listFaults: () => http.get<any, any>("/faults/inject")
+  listFaults: () => http.get<any, any>("/faults/inject"),
+
+  //故障池
+  faultPool: (params?: any) => http.get<any, any>("/faults/pool", { params }),
+  faultPoolStats: () => http.get<any, any>("/faults/pool/stats"),
+  resolveFault: (id: number) => http.put<any, any>(`/faults/pool/${id}/resolve`),
+  
+  //AI助手会话
+  listConversations: () => http.get<any, any>("/assistant/conversations"),
+  createConversation: (data: any) => http.post<any, any>("/assistant/conversations", data),
+  getConversation: (id: number) => http.get<any, any>(`/assistant/conversations/${id}`),
+  updateConversation: (id: number, data: any) => http.put<any, any>(`/assistant/conversations/${id}`, data),
+  deleteConversation: (id: number) => http.delete<any, any>(`/assistant/conversations/${id}`),
 };

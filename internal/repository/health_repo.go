@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"sync"
 	"time"
 
 	"github.com/gpu-health/platform/internal/model"
@@ -29,7 +30,42 @@ func (r *HealthRepo) BatchUpsertSnapshots(snaps []model.GPUHealthSnapshot) error
 	return r.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "gpu_uuid"}},
 		DoUpdates: clause.AssignmentColumns([]string{"cluster_id", "strategy_id", "score", "level", "veto", "veto_reason", "breakdown", "scored_at"}),
-	}).CreateInBatches(snaps, 200).Error
+	}).CreateInBatches(snaps, 1000).Error
+}
+
+// BatchUpsertSnapshotsConcurrent 把快照切成 shards 份并发 upsert。
+// 受 MySQL max_open 限制，shards 建议 <= max_open 的一半（默认 8）。
+func (r *HealthRepo) BatchUpsertSnapshotsConcurrent(snaps []model.GPUHealthSnapshot, shards int) error {
+	if len(snaps) == 0 {
+		return nil
+	}
+	if shards <= 1 || len(snaps) <= 1000 {
+		return r.BatchUpsertSnapshots(snaps) // 量小直接走串行
+	}
+	size := (len(snaps) + shards - 1) / shards
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+	for start := 0; start < len(snaps); start += size {
+		end := start + size
+		if end > len(snaps) {
+			end = len(snaps)
+		}
+		chunk := snaps[start:end]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := r.BatchUpsertSnapshots(chunk); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	return firstErr
 }
 
 // GetSnapshot 取单卡快照（详情页）
@@ -39,13 +75,22 @@ func (r *HealthRepo) GetSnapshot(uuid string) (*model.GPUHealthSnapshot, error) 
 	return &s, err
 }
 
+type SnapshotWithBinding struct {
+	model.GPUHealthSnapshot
+	BoundStrategyID *uint64 `gorm:"column:bound_strategy_id" json:"bound_strategy_id"`
+}
+
 // ListSnapshotsByCluster 列集群内单卡快照，按分降序（坏卡置顶），分页
-func (r *HealthRepo) ListSnapshotsByCluster(clusterID uint64, limit, offset int) ([]model.GPUHealthSnapshot, int64, error) {
-	var out []model.GPUHealthSnapshot
+func (r *HealthRepo) ListSnapshotsByCluster(clusterID uint64, limit, offset int) ([]SnapshotWithBinding, int64, error) {
+	var out []SnapshotWithBinding
 	var total int64
 	r.db.Model(&model.GPUHealthSnapshot{}).Where("cluster_id = ?", clusterID).Count(&total)
-	err := r.db.Where("cluster_id = ?", clusterID).
-		Order("score ASC").Limit(limit).Offset(offset).Find(&out).Error
+	err := r.db.Table("gpu_health_snapshot AS s").
+		Select("s.*, g.strategy_id AS bound_strategy_id").
+		Joins("LEFT JOIN gpu_card g ON g.uuid = s.gpu_uuid").
+		Where("s.cluster_id = ?", clusterID).
+		Order("s.score ASC").Limit(limit).Offset(offset).
+		Scan(&out).Error
 	return out, total, err
 }
 
@@ -92,7 +137,7 @@ func (r *HealthRepo) GlobalStats() (*GlobalStats, error) {
 func (r *HealthRepo) UpsertClusterSummary(s *model.ClusterHealthSummary) error {
 	return r.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "cluster_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"cluster_code", "cluster_name", "total_gpu", "avg_score", "healthy_cnt", "sub_healthy_cnt", "warning_cnt", "critical_cnt", "failed_cnt", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"cluster_code", "cluster_name", "total_gpu", "avg_score", "healthy_cnt", "sub_healthy_cnt", "warning_cnt", "critical_cnt", "failed_cnt", "bound_strategy_id", "updated_at"}),
 	}).Create(s).Error
 }
 
@@ -107,18 +152,20 @@ func (r *HealthRepo) ListClusterSummaries() ([]model.ClusterHealthSummary, error
 //
 // 设计说明：用一条 SQL 在数据库侧完成聚合，避免把几千行拉到内存。
 // 这是万卡场景下集群表格毫秒响应的关键。
+// RecomputeClusterSummaries 从单卡快照重新聚合所有集群汇总（评分服务每轮末尾调用）
 func (r *HealthRepo) RecomputeClusterSummaries() error {
 	type aggRow struct {
-		ClusterID     uint64
-		ClusterCode   string
-		ClusterName   string
-		TotalGPU      int
-		AvgScore      float64
-		HealthyCnt    int
-		SubHealthyCnt int
-		WarningCnt    int
-		CriticalCnt   int
-		FailedCnt     int
+		ClusterID       uint64
+		ClusterCode     string
+		ClusterName     string
+		TotalGPU        int
+		AvgScore        float64
+		HealthyCnt      int
+		SubHealthyCnt   int
+		WarningCnt      int
+		CriticalCnt     int
+		FailedCnt       int
+		BoundStrategyID *uint64
 	}
 	var rows []aggRow
 	err := r.db.Table("gpu_health_snapshot AS s").
@@ -130,26 +177,51 @@ func (r *HealthRepo) RecomputeClusterSummaries() error {
 			SUM(CASE WHEN s.level='sub_healthy' THEN 1 ELSE 0 END) AS sub_healthy_cnt,
 			SUM(CASE WHEN s.level='warning' THEN 1 ELSE 0 END) AS warning_cnt,
 			SUM(CASE WHEN s.level='critical' THEN 1 ELSE 0 END) AS critical_cnt,
-			SUM(CASE WHEN s.level='failed' THEN 1 ELSE 0 END) AS failed_cnt`).
+			SUM(CASE WHEN s.level='failed' THEN 1 ELSE 0 END) AS failed_cnt,
+			c.strategy_id AS bound_strategy_id`).
 		Joins("JOIN cluster c ON c.id = s.cluster_id").
-		Group("s.cluster_id, c.code, c.name").
+		Group("s.cluster_id, c.code, c.name, c.strategy_id").
 		Scan(&rows).Error
 	if err != nil {
 		return err
 	}
 
-	now := time.Now()
-	for _, x := range rows {
-		summary := &model.ClusterHealthSummary{
-			ClusterID: x.ClusterID, ClusterCode: x.ClusterCode, ClusterName: x.ClusterName,
-			TotalGPU: x.TotalGPU, AvgScore: x.AvgScore,
-			HealthyCnt: x.HealthyCnt, SubHealthyCnt: x.SubHealthyCnt,
-			WarningCnt: x.WarningCnt, CriticalCnt: x.CriticalCnt, FailedCnt: x.FailedCnt,
-			UpdatedAt: now,
-		}
-		if err := r.UpsertClusterSummary(summary); err != nil {
-			return err
-		}
+	if len(rows) == 0 {
+		return nil
 	}
-	return nil
+
+	// ===== 改动点：一次批量写入替代逐个循环 =====
+	now := time.Now()
+	summaries := make([]model.ClusterHealthSummary, 0, len(rows))
+	for _, x := range rows {
+		summaries = append(summaries, model.ClusterHealthSummary{
+			ClusterID:       x.ClusterID,
+			ClusterCode:     x.ClusterCode,
+			ClusterName:     x.ClusterName,
+			TotalGPU:        x.TotalGPU,
+			AvgScore:        x.AvgScore,
+			HealthyCnt:      x.HealthyCnt,
+			SubHealthyCnt:   x.SubHealthyCnt,
+			WarningCnt:      x.WarningCnt,
+			CriticalCnt:     x.CriticalCnt,
+			FailedCnt:       x.FailedCnt,
+			BoundStrategyID: x.BoundStrategyID,
+			UpdatedAt:       now,
+		})
+	}
+	return r.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "cluster_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"cluster_code", "cluster_name", "total_gpu", "avg_score", "healthy_cnt", "sub_healthy_cnt", "warning_cnt", "critical_cnt", "failed_cnt", "bound_strategy_id", "updated_at"}),
+	}).CreateInBatches(summaries, 100).Error
+}
+
+func (r *HealthRepo) SearchSnapshots(keyword string, limit int) ([]SnapshotWithBinding, error) {
+	var out []SnapshotWithBinding
+	q := "%" + keyword + "%"
+	err := r.db.Table("gpu_health_snapshot AS s").
+		Select("s.*, g.strategy_id AS bound_strategy_id").
+		Joins("LEFT JOIN gpu_card g ON g.uuid = s.gpu_uuid").
+		Where("s.gpu_uuid LIKE ?", q).
+		Order("s.score ASC").Limit(limit).Scan(&out).Error
+	return out, err
 }

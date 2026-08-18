@@ -1,3 +1,6 @@
+app:
+  roles: []
+
 server:
   addr: ":8080"
   mode: debug   # debug / release
@@ -16,19 +19,34 @@ redis:
 
 scorer:
   cron: "@every 1m"          # 每分钟评分一次
-  strategy_code: "default"   # 默认使用的评分策略
+  strategy_code: "default"
+  vendor_strategy:
+    nvidia: "default"
+    huawei: "npu_default"
+  workers: 0
 
 simulator:
-  cron: "@every 1m"          # 每分钟生成一轮
-  gpu_count: 2000            # 仿真 2000 张卡
-  gpu_per_node: 8            # 每节点 8 卡
-  anomaly_rate: 0.10         # 10% 异常卡
-  metric_ttl: 300            # Redis 指标 5 分钟过期
+  clusters: ["clusterA", "clusterB","npu_clusterA"]
+  nodes_per_cluster: 2
+  gpus_per_node: 8
+  node_group: "groupA"
+  fault_rate: 0.125
+  cron: "@every 1m"
 
 assistant:
   enabled: true              # 开启自动故障修复
   base_url: "https://api.deepseek.com/v1"
-  api_key: "sk-fbac660024354b928151ae92de401e5c"
+  api_key: "sk-"
   model: "deepseek-chat"
   timeout_sec: 60
   max_history: 10            # 最多保留 10 条对话历史
+
+ck:
+  addr: "127.0.0.1:8123"
+  database: "default"
+  username: "default"
+  password: "123456"
+  table: "gpu_metrics"
+  cron: "@every 1m"          # 每分钟写入一次
+  window_sec: 86400            #
+  metric_ttl: 86400

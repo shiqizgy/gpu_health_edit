@@ -37,7 +37,7 @@ func (h *TopologyHandler) Nodes(c *gin.Context) {
 	response.OK(c, list)
 }
 
-// GPUs 点击节点展开：列出该节点的 GPU（树的第三级，叶子）
+// GPUs 节点展开：列出该节点的 GPU（树的第三级，叶子）
 func (h *TopologyHandler) GPUs(c *gin.Context) {
 	nodeID, _ := strconv.ParseUint(c.Param("nodeId"), 10, 64)
 	list, err := h.topo.ListGPUsByNode(nodeID)
@@ -84,4 +84,18 @@ func (h *TopologyHandler) SetGPUStatus(c *gin.Context) {
 		return
 	}
 	response.OK(c, nil)
+}
+
+func (h *TopologyHandler) Search(c *gin.Context) {
+	keyword := c.Query("q")
+	if keyword == "" {
+		response.BadRequest(c, "搜索关键词不能为空")
+		return
+	}
+	list, err := h.topo.SearchGPUs(keyword, 50)
+	if err != nil {
+		response.ServerError(c, err.Error())
+		return
+	}
+	response.OK(c, list)
 }

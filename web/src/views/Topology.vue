@@ -2,7 +2,35 @@
   <div class="topo">
     <div class="panel tree-panel">
       <div class="panel-title">集群 — 节点 — GPU 三级拓扑</div>
-      <div style="padding: 12px 8px">
+      <!-- 搜索区域 -->
+        <div style="padding: 12px 8px">
+          <n-input-group>
+            <n-input
+              v-model:value="searchKeyword"
+              placeholder="输入 UUID 或 SN 搜索 GPU 卡"
+              size="small"
+              clearable
+              @keyup.enter="doSearch"
+            />
+            <n-button size="small" type="primary" @click="doSearch">搜索</n-button>
+          </n-input-group>
+
+          <div v-if="searchResults.length" class="search-results">
+            <div class="search-hint">找到 {{ searchResults.length }} 张卡（点击查看详情）</div>
+            <div
+              v-for="g in searchResults"
+              :key="g.uuid"
+              class="search-item"
+              @click="openSearchedGPU(g)"
+            >
+              <span style="font-weight: 500">GPU{{ g.gpu_index }}</span>
+              <span style="margin-left: 8px; font-size: 12px; color: var(--text-2)">{{ g.uuid }}</span>
+              <span v-if="g.sn" style="margin-left: 8px; font-size: 11px; color: var(--text-2)">(SN: {{ g.sn }})</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding: 0 8px 12px">
         <n-tree
           block-line
           :data="treeData"
@@ -55,12 +83,15 @@
       </template>
     </n-modal>
   </div>
+
+  <GpuMetricDrawer v-model:show="showMetrics" :uuid="activeUuid" />
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { api } from "@/api";
 import { useMessage } from "naive-ui";
+import GpuMetricDrawer from "@/components/GpuMetricDrawer.vue";
 
 const message = useMessage();
 const treeData = ref<any[]>([]);
@@ -68,6 +99,32 @@ const selected = ref<any>(null);
 const showAdd = ref(false);
 const opUUID = ref("");
 const addForm = ref<any>({ uuid: "", cluster_id: 1, node_id: 1, gpu_index: 0, model: "H100-SXM5-80GB" });
+const showMetrics = ref(false);
+const activeUuid = ref("");
+
+// ---- 搜索 ----
+const searchKeyword = ref("");
+const searchResults = ref<any[]>([]);
+
+async function doSearch() {
+  const q = searchKeyword.value.trim();
+  if (!q) { message.warning("请输入搜索关键词"); return; }
+  try {
+    const list = await api.topoSearch(q);
+    searchResults.value = list || [];
+    if (!searchResults.value.length) {
+      message.info("未找到匹配的 GPU");
+    }
+  } catch (e: any) {
+    message.error(e?.response?.data?.msg || "搜索失败");
+  }
+}
+
+function openSearchedGPU(g: any) {
+  selected.value = g;
+  activeUuid.value = g.uuid;
+  showMetrics.value = true;
+}
 
 // 顶层：加载集群
 async function loadClusters() {
@@ -104,7 +161,14 @@ async function onLoad(node: any) {
 
 function nodeProps(info: any) {
   return {
-    onClick: () => { selected.value = info.option.raw; }
+    onClick: () => {
+      selected.value = info.option.raw;
+      // 如果点击的是GPU节点，打开指标抽屉
+      if (info.option.type === "gpu") {
+        activeUuid.value = info.option.raw.uuid;
+        showMetrics.value = true;
+      }
+    }
   };
 }
 
@@ -148,4 +212,13 @@ onMounted(loadClusters);
   max-height: 280px;
 }
 .empty { padding: 40px; text-align: center; color: var(--text-2); font-size: 13px; }
+.search-results { margin-top: 8px; max-height: 240px; overflow-y: auto; }
+.search-hint { font-size: 11px; color: var(--text-2); margin-bottom: 4px; }
+.search-item {
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.search-item:hover { background: var(--bg-0); }
 </style>

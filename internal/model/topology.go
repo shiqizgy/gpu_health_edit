@@ -40,13 +40,15 @@ func (Node) TableName() string { return "node" }
 //   - status 支持 online/offline/maintenance，配合扩缩容。
 type GPUCard struct {
 	ID         uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	UUID       string    `gorm:"type:varchar(128);uniqueIndex;not null" json:"uuid"`     // GPU 唯一编号
-	NodeID     uint64    `gorm:"index;not null" json:"node_id"`                          // 所属节点
-	ClusterID  uint64    `gorm:"index;not null" json:"cluster_id"`                       // 所属集群(冗余,加速聚合)
-	GPUIndex   int       `gorm:"column:gpu_index;not null" json:"gpu_index"`             // 卡在节点内的序号 0-7
-	Model      string    `gorm:"type:varchar(64)" json:"model"`                          // 型号 如 H100-SXM5-80GB
-	Status     string    `gorm:"type:varchar(32);not null;default:online" json:"status"` // online/offline/maintenance
-	StrategyID *uint64   `gorm:"index" json:"strategy_id"`                               // 评分策略ID，指针类型,NULL 表示未指定
+	UUID       string    `gorm:"type:varchar(128);uniqueIndex;not null" json:"uuid"`            // GPU 唯一编号
+	NodeID     uint64    `gorm:"index;not null" json:"node_id"`                                 // 所属节点
+	ClusterID  uint64    `gorm:"index;not null" json:"cluster_id"`                              // 所属集群(冗余,加速聚合)
+	GPUIndex   int       `gorm:"column:gpu_index;not null" json:"gpu_index"`                    // 卡在节点内的序号 0-7
+	Model      string    `gorm:"type:varchar(64)" json:"model"`                                 // 型号 如 H100-SXM5-80GB
+	Status     string    `gorm:"type:varchar(32);not null;default:online" json:"status"`        // online/offline/maintenance
+	Vendor     string    `gorm:"type:varchar(32);index;not null;default:unknown" json:"vendor"` // nvidia/huawei/unknown
+	StrategyID *uint64   `gorm:"index" json:"strategy_id"`                                      // 评分策略ID，指针类型,NULL 表示未指定
+	SN         string    `gorm:"type:varchar(128);index" json:"sn"`                             //机器SN（CK时序查询使用）
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
