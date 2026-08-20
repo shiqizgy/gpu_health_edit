@@ -37,7 +37,7 @@ func (h *MetricHandler) List(c *gin.Context) {
 
 	q := repository.MetricQuery{
 		Dimension:     c.Query("dimension"),
-		DeviceType:    c.Query("device_type"),
+		CardType:      c.Query("card_type"),
 		ValueType:     valueType,
 		OwnerSubject:  ownerSubject,
 		HealthPurpose: healthPurpose,
@@ -62,7 +62,7 @@ func (h *MetricHandler) Create(c *gin.Context) {
 		return
 	}
 	if m.MetricName == "" || m.Dimension == "" {
-		response.BadRequest(c, "metric_key 和 dimension 必填")
+		response.BadRequest(c, "metric_name 和 dimension 必填")
 		return
 	}
 	if err := h.repo.Create(&m); err != nil {

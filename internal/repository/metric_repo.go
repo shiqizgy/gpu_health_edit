@@ -19,7 +19,7 @@ func NewMetricRepo(db *gorm.DB) *MetricRepo { return &MetricRepo{db: db} }
 // MetricQuery 指标列表查询条件（分页 + 多条件过滤 + 关键字模糊查找）
 type MetricQuery struct {
 	Dimension     string // 维度精确匹配
-	DeviceType    string // 设备类型精确匹配
+	CardType      string // GPU/NPU
 	ValueType     int    // 指标类型精确匹配,0=不过滤
 	OwnerSubject  int    // 归属主体,0=不过滤
 	HealthPurpose int    // 健康值计算所属,0=不过滤
@@ -41,8 +41,8 @@ func (r *MetricRepo) List(q MetricQuery) ([]model.MetricDefinition, int64, error
 	if q.Dimension != "" {
 		tx = tx.Where("dimension = ?", q.Dimension)
 	}
-	if q.DeviceType != "" {
-		tx = tx.Where("device_type = ?", q.DeviceType)
+	if q.CardType != "" {
+		tx = tx.Where("device_type = ?", q.CardType)
 	}
 	if q.ValueType != 0 {
 		tx = tx.Where("value_type = ?", q.ValueType)
@@ -52,10 +52,7 @@ func (r *MetricRepo) List(q MetricQuery) ([]model.MetricDefinition, int64, error
 	}
 	if q.Keyword != "" {
 		like := "%" + q.Keyword + "%"
-		tx = tx.Where(
-			"metric_name LIKE ?",
-			like,
-		)
+		tx = tx.Where("metric_name LIKE ? ", like)
 	}
 
 	// 先在过滤条件上数总数（注意要在 Limit/Offset 之前）
@@ -87,24 +84,34 @@ func (r *MetricRepo) Create(m *model.MetricDefinition) error {
 func (r *MetricRepo) Update(id uint64, m *model.MetricDefinition) error {
 	// 用 map 显式指定可更新字段，避免 GORM 对零值字段跳过更新
 	return r.db.Model(&model.MetricDefinition{ID: id}).Updates(map[string]any{
-		"metricName":    m.MetricName,
-		"unit":          m.Unit,
-		"value_type":    m.ValueType,
-		"dimension":     m.Dimension,
-		"concept":       m.Conception,
-		"device_type":   m.DeviceType,
-		"up_bound":      m.UpperBond,
-		"lower_bound":   m.LowerBound,
-		"warn_upbound":  m.WarnupBound,
-		"warn_lowbound": m.WarnlowBound,
-		"warn_rate":     m.WarnRate,
-		"rate_unit":     m.NormalRateUnit,
-		"bool_normal":   m.BoolNormal,
-		"bool_abnormal": m.BoolAbnormal,
-		"enum_result":   m.EnumResult,
-		"is_veto":       m.IsVeto,
-		"remark":        m.Remark,
-		"is_health_key": m.IsHealthKey,
+		"seq_no":           m.SeqNo,
+		"official_num":     m.OfficialNum,
+		"card_type":        m.CardType,
+		"metric_name":      m.MetricName,
+		"concept":          m.Conception,
+		"unit":             m.Unit,
+		"dimension":        m.Dimension,
+		"owner_subject":    m.OwnerSubject,
+		"health_purpose":   m.HealthPurpose,
+		"value_type":       m.ValueType,
+		"work_range":       m.WorkRange,
+		"upper_bond":       m.UpperBond,
+		"lower_bound":      m.LowerBound,
+		"warn_upbound":     m.WarnupBound,
+		"warn_lowbound":    m.WarnlowBound,
+		"normal_rate":      m.NormalRate,
+		"warn_rate":        m.WarnRate,
+		"normal_rate_unit": m.NormalRateUnit,
+		"bool_normal":      m.BoolNormal,
+		"bool_abnormal":    m.BoolAbnormal,
+		"enum_result":      m.EnumResult,
+		"enum_score":       m.EnumScore,
+		"is_veto":          m.IsVeto,
+		"derate_threshold": m.DerateThreshold,
+		"source_ref":       m.SourceRef,
+		"vender":           m.Vender,
+		"remark":           m.Remark,
+		"is_health_key":    m.IsHealthKey,
 	}).Error
 }
 
@@ -119,10 +126,10 @@ func (r *MetricRepo) ListHealthKeys() ([]model.MetricDefinition, error) {
 	return out, err
 }
 
-// ListAllKeys 返回所有已定义指标的 metric_key 列表
+// ListAllKeys 返回所有已定义指标的 metric_name 列表
 func (r *MetricRepo) ListAllKeys() ([]string, error) {
 	var keys []string
-	err := r.db.Model(&model.MetricDefinition{}).Pluck("metric_key", &keys).Error
+	err := r.db.Model(&model.MetricDefinition{}).Pluck("metric_name", &keys).Error
 	return keys, err
 }
 
@@ -133,7 +140,7 @@ func (r *MetricRepo) UpdateHealthKeyByMetricKeys(keys []string, enabled bool) (i
 		return 0, nil
 	}
 	res := r.db.Model(&model.MetricDefinition{}).
-		Where("metric_key IN ? AND is_health_key <> ?", keys, enabled).
+		Where("metric_name IN ? AND is_health_key <> ?", keys, enabled).
 		Update("is_health_key", enabled)
 	return res.RowsAffected, res.Error
 }

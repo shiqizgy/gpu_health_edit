@@ -1,6 +1,10 @@
 package scoring
 
-import "strings"
+import (
+	"encoding/json"
+	"strconv"
+	"strings"
+)
 
 // 单指标评分：按 value_type 分派到不同评分方法，统一输出 0-100。
 // 三档固定分：健康 100 / 警告 60 / 故障 20。
@@ -17,6 +21,14 @@ const (
 	ScoreWarning  = 60.0  // 警告区
 	ScoreCritical = 20.0  // 故障区
 )
+
+type EnumScoreRule struct {
+	Mode     string             `json:"mode"`
+	Default  *float64           `json:"default"`
+	Map      map[string]float64 `json:"map"`
+	Critical string             `json:"critical"`
+	Warning  string             `json:"warning"`
+}
 
 // MetricBounds 单指标评分所需的全部边界（编译策略时从 MetricDefinition 填充）。
 type MetricBounds struct {
@@ -35,6 +47,9 @@ type MetricBounds struct {
 	// 布尔：正常值 / 异常值（字符串，兼容 "0"/"1"/"OK" 等）
 	BoolNormal   string
 	BoolAbnormal string
+
+	//位掩码与枚举类别
+	EnumScore *EnumScoreRule
 }
 
 // 指标数值类型码（对应 metric_ordinal.md）
@@ -58,8 +73,10 @@ func ScoreByType(b MetricBounds, value float64) float64 {
 		return scoreRate(b.NormalRate, b.WarnRate, value)
 	case VTBool:
 		return scoreBool(b.BoolNormal, b.BoolAbnormal, value)
-	case VTOrdinal, VTOther:
-		return ScoreHealthy // 枚举/其他：交由专用逻辑(XID查表)或不扣分
+	case VTOrdinal:
+		return scoreEnum(b.EnumScore, value)
+	case VTOther:
+		return ScoreHealthy // 版本号/字符串类，不参与数值评分
 	default: // VTGauge 及未知
 		return scoreRange(b, value)
 	}
@@ -117,4 +134,53 @@ func boolToken(v float64) string {
 		return "1"
 	}
 	return strings.TrimSpace(itoa(int(v)))
+}
+
+func ParseEnumScore(raw string) *EnumScoreRule {
+	if strings.TrimSpace(raw) == "" || raw == "null" {
+		return nil
+	}
+	var r EnumScoreRule
+	if err := json.Unmarshal([]byte(raw), &r); err != nil {
+		return nil
+	}
+	return &r
+}
+
+func parseMask(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
+		n, _ := strconv.ParseInt(s[2:], 16, 64)
+		return n
+	}
+	n, _ := strconv.ParseInt(s, 10, 64)
+	return n
+}
+
+func scoreEnum(r *EnumScoreRule, v float64) float64 {
+	if r == nil {
+		return ScoreHealthy // 未配置规则：不扣分（启动时会有日志提示）
+	}
+	switch r.Mode {
+	case "bitmask":
+		iv := int64(v)
+		if m := parseMask(r.Critical); m != 0 && iv&m != 0 {
+			return ScoreCritical
+		}
+		if m := parseMask(r.Warning); m != 0 && iv&m != 0 {
+			return ScoreWarning
+		}
+		return ScoreHealthy
+	default: // enum
+		if s, ok := r.Map[strconv.FormatInt(int64(v), 10)]; ok {
+			return s
+		}
+		if r.Default != nil {
+			return *r.Default
+		}
+		return ScoreHealthy
+	}
 }

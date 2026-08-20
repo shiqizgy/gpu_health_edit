@@ -48,6 +48,7 @@ type Result struct {
 	Level      string               `json:"level"`
 	Veto       bool                 `json:"veto"`
 	VetoReason string               `json:"veto_reason"`
+	Coverage   float64              `json:"coverage"` //本次覆盖的维度权重占比0～1
 	Dimensions []DimensionBreakdown `json:"dimensions"`
 }
 
@@ -74,11 +75,13 @@ type vetoState struct {
 //  2. 维度内加权平均：维度分 = Σ(单指标分×权重) / Σ(权重)
 //  3. 维度间加权平均：总分 = Σ(维度分×维度权重)
 //  4. 一票否决"后封顶"：命中否决的维度分与整卡总分都锁到 VetoFloor
+
+const MinCoverage = 0.6 // 覆盖率低于此值不给出可信分数
 func Score(metrics map[string]float64, strategy *CompiledStrategy) Result {
 	dims, veto := accumulate(metrics, strategy)
 
 	result := Result{}
-	result.Dimensions, result.Score = aggregateDimensions(dims, strategy, veto)
+	result.Dimensions, result.Score, result.Coverage = aggregateDimensions(dims, strategy, veto)
 
 	// 一票否决把整卡总分锁到最低
 	if veto.hit && result.Score > VetoFloor {
@@ -86,6 +89,11 @@ func Score(metrics map[string]float64, strategy *CompiledStrategy) Result {
 	}
 	result.Veto = veto.hit
 	result.VetoReason = veto.reason
+	// 覆盖率不足：标记为 unknown，不给虚高分数
+	if result.Coverage < MinCoverage && !veto.hit {
+		result.Level = "unknown"
+		return result
+	}
 	result.Level = LevelFromScore(result.Score, veto.hit)
 	return result
 }
@@ -105,7 +113,7 @@ func accumulate(metrics map[string]float64, strategy *CompiledStrategy) (map[str
 		}
 
 		mScore := scoreOne(key, rule, value)
-		if reason, hit := checkVeto(key, rule, value); hit {
+		if reason, hit := checkVeto(key, rule, value, mScore); hit {
 			veto.hit = true
 			veto.reason = reason
 			veto.dims[rule.Dimension] = true
@@ -133,7 +141,8 @@ func scoreOne(key string, rule CompiledRule, value float64) float64 {
 }
 
 // checkVeto 一票否决判定，返回(否决原因, 是否命中)。
-func checkVeto(key string, rule CompiledRule, value float64) (string, bool) {
+// 优先级：XID 致命码 > 显式阈值(veto_threshold>0) > 该指标本身落入故障档
+func checkVeto(key string, rule CompiledRule, value, mScore float64) (string, bool) {
 	if key == xidMetricKey {
 		// XID：仅命中"致命码"集合才否决
 		if XIDIsFatal(int(value)) {
@@ -141,8 +150,14 @@ func checkVeto(key string, rule CompiledRule, value float64) (string, bool) {
 		}
 		return "", false
 	}
-	// 其他 veto 指标（DBE、Row Remap Failure 等）走阈值否决
-	if rule.IsVeto && rule.VetoThreshold > 0 && value >= rule.VetoThreshold {
+	if !rule.IsVeto {
+		return "", false
+	}
+	if rule.VetoThreshold > 0 && value >= rule.VetoThreshold {
+		return key, true
+	}
+	// ★ 核心改动：否决指标只要被评为故障档(20分)，即触发否决
+	if mScore <= ScoreCritical {
 		return key, true
 	}
 	return "", false
@@ -163,7 +178,7 @@ func addToDim(dims map[string]*dimAccum, rule CompiledRule, value, mScore float6
 }
 
 // aggregateDimensions 维度内求分 + 维度间加权，返回维度明细与整卡总分。
-func aggregateDimensions(dims map[string]*dimAccum, strategy *CompiledStrategy, veto vetoState) ([]DimensionBreakdown, float64) {
+func aggregateDimensions(dims map[string]*dimAccum, strategy *CompiledStrategy, veto vetoState) ([]DimensionBreakdown, float64, float64) {
 	var total, totalDimWeight float64
 	breakdowns := make([]DimensionBreakdown, 0, len(dims))
 
@@ -178,10 +193,20 @@ func aggregateDimensions(dims map[string]*dimAccum, strategy *CompiledStrategy, 
 		})
 	}
 
-	if totalDimWeight <= 0 {
-		return breakdowns, 100
+	// 分母用策略声明的全部维度权重，算出覆盖率
+	var declaredWeight float64
+	for _, w := range strategy.DimensionWeights {
+		declaredWeight += w
 	}
-	return breakdowns, total / totalDimWeight
+	coverage := 0.0
+	if declaredWeight > 0 {
+		coverage = totalDimWeight / declaredWeight
+	}
+
+	if totalDimWeight <= 0 {
+		return breakdowns, 0, 0 // 从 100 改成 0：一个维度都没算出来，不能当健康
+	}
+	return breakdowns, total / totalDimWeight, coverage
 }
 
 // dimensionScore 单维度得分：维度内加权平均；命中否决则锁到 VetoFloor。

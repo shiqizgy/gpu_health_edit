@@ -141,7 +141,7 @@ func (s *ScorerService) RunOnceWith(ctx context.Context, frames []types.MetricFr
 				Level:      result.Level,
 				Veto:       result.Veto,
 				VetoReason: result.VetoReason,
-				Breakdown:  "null",
+				Breakdown:  scoring.BreakdownJSON(result),
 				ScoredAt:   now,
 			}
 			if result.Level != "healthy" {

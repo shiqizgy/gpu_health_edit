@@ -51,8 +51,20 @@ func (s *StrategyService) Compile(strategy *model.ScoringStrategy) (*scoring.Com
 	}
 
 	rules := map[string]scoring.CompiledRule{}
+	var missing []string
 	for _, rule := range strategy.Rules {
-		def := defOf[rule.MetricKey]
+		def, ok := defOf[rule.MetricKey]
+		if !ok {
+			//定义表里没有则跳过，不要产生Dimension=“”的规则
+			missing = append(missing, rule.MetricKey)
+			continue
+		}
+		if def.Dimension == "" {
+			missing = append(missing, rule.MetricKey+"(无维度)")
+			continue
+		}
+		//否决
+		isVeto := rule.IsVeto || def.IsVeto == 1
 		rules[rule.MetricKey] = scoring.CompiledRule{
 			MetricKey: rule.MetricKey,
 			Dimension: def.Dimension,
@@ -67,11 +79,60 @@ func (s *StrategyService) Compile(strategy *model.ScoringStrategy) (*scoring.Com
 				WarnRate:     def.WarnRate,
 				BoolNormal:   def.BoolNormal,
 				BoolAbnormal: def.BoolAbnormal,
+				EnumScore:    scoring.ParseEnumScore(def.EnumScore),
 			},
-			IsVeto:        rule.IsVeto,
+			IsVeto:        isVeto,
 			VetoThreshold: rule.VetoThreshold,
 		}
 	}
+
+	if len(missing) > 0 {
+		logger.L.Warnf("策略%s有%d个规则在metric_definition中缺失或无维度，已跳过：%v", strategy.Code, len(missing), missing)
+	}
+
+	//维度权重自检：key 必须能在实际指标维度里找到
+	dimsInUse := map[string]bool{}
+	for _, r := range rules {
+		dimsInUse[r.Dimension] = true
+	}
+	for dim := range dimWeights {
+		if !dimsInUse[dim] {
+			logger.L.Warnf("策略 %s 的维度权重含无效 key %q（没有任何指标属于该维度）", strategy.Code, dim)
+		}
+	}
+	for dim := range dimsInUse {
+		if _, ok := dimWeights[dim]; !ok {
+			logger.L.Warnf("策略 %s 缺少维度 %q 的权重，该维度将不计入总分", strategy.Code, dim)
+		}
+	}
+
+	//var neverPenalized []string
+	//for k, r := range rules {
+	//	if k == xidMetricKey {
+	//		continue
+	//	}
+	//	b := r.Bounds
+	//	dead := false
+	//	switch b.ValueType {
+	//	case VTOther:
+	//		dead = true
+	//	case VTOrdinal:
+	//		dead = b.EnumScore == nil
+	//	case VTGauge, VTGaugeRate:
+	//		dead = b.UpperBond == nil && b.LowerBound == nil
+	//	case VTCounter, VTDuration, VTLevel:
+	//		dead = b.NormalRate == nil
+	//	case VTBool:
+	//		dead = b.BoolNormal == "" && b.BoolAbnormal == ""
+	//	}
+	//	if dead {
+	//		neverPenalized = append(neverPenalized, k)
+	//	}
+	//}
+	//if len(neverPenalized) > 0 {
+	//	logger.L.Warnf("策略 %s 有 %d 个指标缺少评分边界，将恒定满分: %v",
+	//		strategy.Code, len(neverPenalized), neverPenalized)
+	//}
 
 	return &scoring.CompiledStrategy{
 		StrategyID:       strategy.ID,
@@ -105,7 +166,7 @@ func (s *StrategyService) GetCompiled(code string) (*scoring.CompiledStrategy, e
 	cs := &cachedStrategy{updatedAt: strategy.UpdatedAt}
 	cs.compiled.Store(compiled)
 	s.cache.Store(code, cs)
-	logger.L.Infof("策略 %s 已编译/重载，版本=%d，规则数=%d", code, strategy.UpdatedAt, len(compiled.Rules))
+	logger.L.Infof("策略 %s 已编译/重载，updated_at=%s，规则数=%d", code, strategy.UpdatedAt.Format(time.RFC3339), len(compiled.Rules))
 	return compiled, nil
 }
 

@@ -104,7 +104,7 @@
           </n-gi>
 
           <n-gi>
-            <n-form-item label="速率单位"><n-input v-model:value="form.rate_unit" placeholder="次/天、μs/s" /></n-form-item>
+            <n-form-item label="速率单位"><n-input v-model:value="form.normal_rate_unit" placeholder="次/天、μs/s" /></n-form-item>
           </n-gi>
           <n-gi>
             <n-form-item label="布尔正常"><n-input v-model:value="form.bool_normal" placeholder="0 / OK" /></n-form-item>
@@ -115,7 +115,7 @@
         </n-grid>
 
         <n-form-item label="概念说明">
-          <n-input v-model:value="form.display_name" type="textarea" :autosize="{ minRows: 2 }" />
+          <n-input v-model:value="form.concept" type="textarea" :autosize="{ minRows: 2 }" />
         </n-form-item>
         <n-form-item label="枚举结果">
           <n-input v-model:value="form.enum_result" type="textarea" :autosize="{ minRows: 2 }" />
@@ -152,28 +152,29 @@ import { useMessage, useDialog, NButton, NSpace, NTag } from "naive-ui";
 const message = useMessage();
 const dialog = useDialog();
 const route = useRoute();
-const pageDevice = computed(() => (route.meta.deviceType as string) || "gpu");
+const pageCardType = computed(() => (route.meta.cardType as string) || "GPU");
 
 // —— 维度（新表 dimension 实际值，来自种子数据）——
 const gpuDims = [
-  { label: "温度散热", value: "thermal温度散热" },
-  { label: "功耗电源", value: "power功耗电源" },
-  { label: "显存可靠性", value: "memory显存可靠性" },
-  { label: "PCIe总线", value: "pcie总线" },
+  { label: "显存可靠性",     value: "memory显存可靠性" },
+  { label: "算力性能",       value: "compute算力性能" },
   { label: "NVLink片间互连", value: "nvlink片间互连（DCGM）" },
-  { label: "驱动", value: "driver驱动（DCGM）" },
-  { label: "算力性能", value: "compute算力性能" },
+  { label: "温度散热",       value: "thermal温度散热" },
+  { label: "功耗电源",       value: "power功耗电源" },
+  { label: "驱动",           value: "driver驱动（DCGM）" },
+  { label: "PCIe总线",       value: "pcie总线" },
 ];
 const npuDims = [
-  { label: "温度散热", value: "thermal温度散热" },
-  { label: "功耗电源", value: "power功耗电源" },
-  { label: "显存可靠性", value: "memory显存可靠性" },
-  { label: "PCIe总线", value: "pcie总线" },
-  { label: "昇腾互连通信", value: "interconnect昇腾互连通信" },
+  { label: "昇腾互连通信",     value: "interconnect昇腾互连通信" },
+  { label: "显存可靠性",       value: "memory显存可靠性" },
   { label: "可靠性与运行状态", value: "reliability昇腾可靠性与运行状态" },
-  { label: "辅助与效率指标", value: "auxiliary辅助与效率指标" },
-  { label: "算力性能", value: "compute算力性能" },
+  { label: "PCIe总线",         value: "pcie总线" },
+  { label: "算力性能",         value: "compute算力性能" },
+  { label: "辅助与效率指标",   value: "auxiliary辅助与效率指标" },
+  { label: "温度散热",         value: "thermal温度散热" },
+  { label: "功耗电源",         value: "power功耗电源" },
 ];
+
 const dimOptions = computed(() => (pageDevice.value === "npu" ? npuDims : gpuDims));
 const dimLabels: Record<string, string> = Object.fromEntries(
   [...gpuDims, ...npuDims].map((d) => [d.value, d.label])
@@ -235,29 +236,37 @@ const total = ref(0);
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)));
 
 function emptyForm() {
-  const isNpu = pageDevice.value === "npu";
+  const isNpu = pageDevice.value === "NPU";
   return {
     id: 0, seq_no: null, metric_name: "", official_num: "",
     card_type: isNpu ? "NPU" : "GPU",
-    device_type: isNpu ? "npu" : "gpu",
     dimension: isNpu ? "reliability昇腾可靠性与运行状态" : "compute算力性能",
     value_type: 1, owner_subject: 1, health_purpose: 1,
     unit: "", work_range: "",
     lower_bound: null, upper_bond: null, warn_lowbound: null, warn_upbound: null,
-    normal_rate: null, warn_rate: null, rate_unit: "",
-    bool_normal: "", bool_abnormal: "", enum_result: "",
-    display_name: "", is_veto: 0, derate_threshold: "", source_ref: "",
+    normal_rate: null, warn_rate: null, normal_rate_unit: "",
+    bool_normal: "", bool_abnormal: "", enum_result: "",enum_score: "",
+    concept: "", is_veto: 0, derate_threshold: "", source_ref: "",
     vender: isNpu ? "华为昇腾" : "NVIDIA",
     remark: "", is_health_key: true,
   };
 }
 
 const columns = [
+  { type: "expand", renderExpand: (r: any) => h("div", { class: "metric-detail" }, [
+      h("p", null, [h("b", null, "概念："), r.concept || "—"]),
+      h("p", null, [h("b", null, "枚举结果："), r.enum_result || "—"]),
+      h("p", null, [h("b", null, "降频/关机阈值："), r.derate_threshold || "—"]),
+      h("p", null, [h("b", null, "来源依据："), r.source_ref || "—"]),
+      h("p", null, [h("b", null, "备注："), r.remark || "—"]),
+    ]) },
   { title: "序号", key: "seq_no", width: 60 },
   { title: "指标名称", key: "metric_name", width: 280, ellipsis: { tooltip: true },
     render: (r: any) => h("span", { class: "mono", style: "font-size:12px;color:#9aa7b4" }, r.metric_name) },
   { title: "官方编号", key: "official_num", width: 170, ellipsis: { tooltip: true } },
-  { title: "维度", key: "dimension", width: 110,
+  { title: "卡类型", key: "card_type", width: 70 },
+  { title: "厂商", key: "vender", width: 90 },
+  { title: "维度", key: "dimension", width: 110,f
     render: (r: any) => h(NTag, { size: "small", bordered: false }, () => dimLabels[r.dimension] || r.dimension) },
   { title: "数值类型", key: "value_type", width: 130,
     render: (r: any) => vtLabels[r.value_type] || r.value_type },
@@ -267,6 +276,15 @@ const columns = [
     render: (r: any) => purposeLabels[r.health_purpose] || r.health_purpose },
   { title: "单位", key: "unit", width: 70 },
   { title: "工作范围", key: "work_range", width: 110, ellipsis: { tooltip: true } },
+  { title: "正常区间", key: "_normal", width: 110,render: (r: any) => fmtRange(r.lower_bound, r.upper_bond) },
+  { title: "告警区间", key: "_warn", width: 110,render: (r: any) => fmtRange(r.warn_lowbound, r.warn_upbound) },
+  { title: "速率(正常/告警)", key: "_rate", width: 130,render: (r: any) => {
+  if (r.normal_rate == null && r.warn_rate == null) return "—";
+  return `${r.normal_rate ?? "—"} / ${r.warn_rate ?? "—"} ${r.normal_rate_unit || ""}`;
+      } },
+  { title: "布尔(正常/异常)", key: "_bool", width: 120,render: (r: any) => (r.bool_normal || r.bool_abnormal)
+        ? `${r.bool_normal || "—"} / ${r.bool_abnormal || "—"}` : "—" },
+
   { title: "一票否决", key: "is_veto", width: 80,
     render: (r: any) => r.is_veto === 1
       ? h(NTag, { size: "small", type: "error", bordered: false }, () => "否决")
@@ -282,11 +300,16 @@ const columns = [
   }
 ];
 
+function fmtRange(lo: any, up: any) {
+  if (lo == null && up == null) return "—";
+  return `${lo ?? "-∞"} ~ ${up ?? "+∞"}`;
+}
+
 async function load() {
   const params: any = {
     limit: pageSize,
     offset: (page.value - 1) * pageSize,
-    device_type: pageDevice.value,
+    card_type: pageCardType.value,
   };
   if (keyword.value.trim()) params.keyword = keyword.value.trim();
   if (dimFilter.value) params.dimension = dimFilter.value;
@@ -339,7 +362,7 @@ function confirmDelete(r: any) {
   });
 }
 
-watch(pageDevice, () => { page.value = 1; load(); });
+watch(pageCardType, () => { page.value = 1; load(); });
 onMounted(load);
 </script>
 

@@ -21,8 +21,8 @@ function lazy(loader: () => Promise<any>) {
 const routes: RouteRecordRaw[] = [
   { path: "/", redirect: "/dashboard" },
   { path: "/dashboard", name: "dashboard", component: lazy(() => import("@/views/Dashboard.vue")) },
-  { path: "/metrics/dcgm", name: "metrics-dcgm", component: lazy(() => import("@/views/Metrics.vue")), meta: { deviceType: "gpu" } },
-  { path: "/metrics/npu",  name: "metrics-npu",  component: lazy(() => import("@/views/Metrics.vue")), meta: { deviceType: "npu" } },
+  { path: "/metrics/dcgm", name: "metrics-dcgm", component: lazy(() => import("@/views/Metrics.vue")), meta: { cardType: "GPU" } },
+  { path: "/metrics/npu",  name: "metrics-npu",  component: lazy(() => import("@/views/Metrics.vue")), meta: { cardType: "NPU" } },
   // 健康评估
   { path: "/topology", name: "topology", component: lazy(() => import("@/views/Topology.vue")) },
   { path: "/health", name: "health", component: lazy(() => import("@/views/Health.vue")) },

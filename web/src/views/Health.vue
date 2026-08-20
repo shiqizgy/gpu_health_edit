@@ -610,24 +610,22 @@ async function loadStrategies() {
 const addableMetricOptions = computed(() => {
   const existingKeys = new Set(editRules.value.map((r: any) => r.metric_key));
   return allMetrics.value
-    .filter((m: any) => !existingKeys.has(m.metric_key))
+    .filter((m: any) => !existingKeys.has(m.metric_name))
     .map((m: any) => ({
-      label: `${m.display_name}（${m.metric_key}）`,
-      value: m.metric_key,
+      label: `${m.concept || m.metric_name}（${m.metric_name}）`,
+      value: m.metric_name,
     }));
 });
 
 function doAddMetric() {
   if (!addMetricKey.value) return;
-  const metric = allMetrics.value.find((m: any) => m.metric_key === addMetricKey.value);
+  const metric = allMetrics.value.find((m: any) => m.metric_name === addMetricKey.value);
   if (!metric) return;
   editRules.value.push({
     id: 0,
     strategy_id: editStrategy.value.id,
-    metric_key: metric.metric_key,
+    metric_key: metric.metric_name,
     weight: 1.0,
-    curve_type: "none",
-    curve_params: null,
     is_veto: false,
     veto_threshold: 0,
   });
@@ -654,6 +652,12 @@ async function openEditStrategy(r: any) {
 
 async function saveStrategy() {
   try {
+    const sum = Object.values(dimensionWeights.value).reduce((a, b) => a + Number(b), 0);
+    if (Math.abs(sum - 1) > 0.001) {
+      message.error(`维度权重之和必须为 1.000，当前为 ${sum.toFixed(3)}`);
+      return;
+    }
+
     // 构建维度权重JSON（动态维度，自适应 DCGM 7 维 / NPU 8 维）
     const dimensionWeightsJson = JSON.stringify(dimensionWeights.value);
 
@@ -664,31 +668,16 @@ async function saveStrategy() {
     });
 
     // 2. 指标规则
-    const processedRules = editRules.value.map(rule => {
-      // 手动构建每个字段，确保格式正确
-      const newRule = {
-        id: rule.id || 0,
-        strategy_id: editStrategy.value.id,
-        metric_key: rule.metric_key || rule.metricKey,
-        weight: parseFloat(rule.weight) || 0,
-        curve_type: rule.curve_type || rule.curveType || 'none',
-        is_veto: Boolean(rule.is_veto || rule.isVeto),
-        veto_threshold: parseFloat(rule.veto_threshold || rule.vetoThreshold) || 0
-      };
-
-      // 关键修复：确保curve_params永远不会是空字符串
-      const originalParams = rule.curve_params || rule.curveParams;
-      if (!originalParams || originalParams === "" || originalParams === "null") {
-        newRule.curve_params = null;
-      } else {
-        newRule.curve_params = originalParams;
-      }
-
-      return newRule;
-    });
+    const processedRules = editRules.value.map((rule: any) => ({
+      id: rule.id || 0,
+      strategy_id: editStrategy.value.id,
+      metric_key: rule.metric_key,
+      weight: parseFloat(rule.weight) || 0,
+      is_veto: Boolean(rule.is_veto),
+      veto_threshold: parseFloat(rule.veto_threshold) || 0,
+    }));
 
     // 添加前端调试
-    console.log('即将发送的规则数据:', JSON.stringify(processedRules, null, 2));
 
     await api.updateStrategyRules(editStrategy.value.id, processedRules);
     message.success("策略已保存，评分服务将在 5 秒内热加载");
@@ -717,12 +706,17 @@ const newStrategy = ref<any>({
 });
 
 // 维度的中文名
-const dimNameMap: Record<string, string> = {
-  dcgm_pcie: "PCIe总线", dcgm_memory: "显存与ECC", dcgm_thermal: "温度散热",
-  dcgm_power: "功耗电源", dcgm_nvlink: "NVLink片间互连", dcgm_driver: "驱动/XID稳定性", dcgm_compute: "算力性能",
-  npu_pcie: "PCIe总线", npu_memory: "显存与ECC", npu_thermal: "温度散热",
-  npu_power: "功耗电源", npu_interconnect: "昇腾专有互连",
-  npu_reliability: "可靠性与运行状态", npu_auxiliary: "辅助与效率指标", npu_compute: "算力性能",
+const dimensionLabels: Record<string, string> = {
+  "thermal温度散热": "温度散热",
+  "power功耗电源": "功耗电源",
+  "memory显存可靠性": "显存与ECC",
+  "pcie总线": "PCIe总线",
+  "compute算力性能": "算力性能",
+  "nvlink片间互连（DCGM）": "NVLink片间互连",
+  "driver驱动（DCGM）": "驱动/XID稳定性",
+  "interconnect昇腾互连通信": "昇腾互连通信",
+  "reliability昇腾可靠性与运行状态": "可靠性与运行状态",
+  "auxiliary辅助与效率指标": "辅助与效率指标",
 };
 
 const dimensionWeights = ref<Record<string, number>>({});
@@ -815,10 +809,8 @@ async function doCreateStrategy() {
 
   // 组装维度权重 JSON
   const dimWeights = JSON.stringify({
-    hardware: f.weight_hardware,
-    stability: f.weight_stability,
-    performance: f.weight_performance,
-    environment: f.weight_environment
+    hardware: f.weight_hardware, stability: f.weight_stability,
+    performance: f.weight_performance, environment: f.weight_environment
   });
 
   // 组装规则(剥掉 enabled 字段)
@@ -864,7 +856,7 @@ const groupedRules = computed(() => {
   // 用 allMetrics 拿到每个指标的维度和显示名
   const metricMeta: Record<string, any> = {};
   for (const m of allMetrics.value) {
-    metricMeta[m.metric_key] = m;
+    metricMeta[m.metric_name] = m;
   }
 
   for (const r of newStrategy.value.metricRules) {
@@ -879,7 +871,7 @@ const groupedRules = computed(() => {
     // 创建深拷贝，确保响应式追踪
     const ruleCopy = {
       ...r,
-      _displayName: meta.display_name || r.metric_key,
+      _displayName: meta.concept || r.metric_key,
       _unit: meta.unit || ''
     };
     groups[dim].push(ruleCopy);
