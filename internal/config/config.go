@@ -39,10 +39,10 @@ type RedisConfig struct {
 
 // ScorerConfig 评分服务配置
 type ScorerConfig struct {
-	Cron           string            `yaml:"cron"`            // 定时表达式，每分钟评分
-	StrategyCode   string            `yaml:"strategy_code"`   // 默认使用的策略代码
-	VendorStrategy map[string]string `yaml:"vendor_strategy"` // vendor指向评分策略
-	Workers        int               `yaml:"workers"`         //评分协程池大小，<=0取CPU核数
+	Cron             string            `yaml:"cron"`               // 定时表达式，每分钟评分
+	StrategyCode     string            `yaml:"strategy_code"`      // 默认使用的策略代码
+	CardTypeStrategy map[string]string `yaml:"card_type_strategy"` // vendor指向评分策略
+	Workers          int               `yaml:"workers"`            //评分协程池大小，<=0取CPU核数
 }
 
 // SimulatorConfig 仿真服务配置

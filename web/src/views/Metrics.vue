@@ -175,7 +175,7 @@ const npuDims = [
   { label: "功耗电源",         value: "power功耗电源" },
 ];
 
-const dimOptions = computed(() => (pageCardType.value === "npu" ? npuDims : gpuDims));
+const dimOptions = computed(() => (pageCardType.value === "NPU" ? npuDims : gpuDims));
 const dimLabels: Record<string, string> = Object.fromEntries(
   [...gpuDims, ...npuDims].map((d) => [d.value, d.label])
 );

@@ -91,9 +91,9 @@ type MetricDefinition struct {
 	SourceRef       string `gorm:"type:text" json:"source_ref"`          //来源依据
 	Vendor          string `gorm:"type:varchar(32);index" json:"vendor"` //厂商
 
-	ScoreScope  int       `gorm:"type:tinyint;index;default:0" json:"score_scope"` // 新增：评分范围控制，见第三节
-	Remark      string    `gorm:"type:varchar(255)" json:"remark"`                 //备注
-	IsHealthKey bool      `gorm:"default:true" json:"is_health_key"`               //是否参与健康值评分
+	//ScoreScope  int       `gorm:"type:tinyint;index;default:0" json:"score_scope"` // 评分范围控制
+	Remark      string    `gorm:"type:varchar(255)" json:"remark"`   //备注
+	IsHealthKey bool      `gorm:"default:true" json:"is_health_key"` //是否参与健康值评分
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

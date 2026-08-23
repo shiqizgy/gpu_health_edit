@@ -113,7 +113,7 @@ func detectDevice(metrics map[string]float64) (string, string) {
 
 func (s *CKLoaderService) loadCounterKeys() {
 	var defs []model.MetricDefinition
-	if err := s.metricRepo.DB().Where("value_type IN ?", []int{3, 4, 5}).Where("score_scope > 0").Find(&defs).Error; err != nil {
+	if err := s.metricRepo.DB().Where("value_type_code IN ?", []int{3, 4, 5}).Where("is_health_key = ?", true).Find(&defs).Error; err != nil {
 		logger.L.Warnf("加载 counter 类指标失败: %v", err)
 		return
 	}
@@ -190,15 +190,6 @@ func (s *CKLoaderService) applyDelta(frames map[string]*types.MetricFrame) {
 
 // 关于npu中通道等指标的聚合
 var multiLaneGroups = map[string][]string{
-	"npu_chip_info_hccs_crc_err_cnt_max": {
-		"npu_chip_info_hccs_statistic_info_crc_err_cnt_1",
-		"npu_chip_info_hccs_statistic_info_crc_err_cnt_2",
-		"npu_chip_info_hccs_statistic_info_crc_err_cnt_3",
-		"npu_chip_info_hccs_statistic_info_crc_err_cnt_4",
-		"npu_chip_info_hccs_statistic_info_crc_err_cnt_5",
-		"npu_chip_info_hccs_statistic_info_crc_err_cnt_6",
-		"npu_chip_info_hccs_statistic_info_crc_err_cnt_7",
-	},
 	"npu_chip_info_hccs_bandwidth_info_tx_max": { //HCCS链路单链路发送带宽
 		"npu_chip_info_hccs_bandwidth_info_tx_1",
 		"npu_chip_info_hccs_bandwidth_info_tx_2",
@@ -421,6 +412,9 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]types.MetricFrame, err
 
 	// 对 counter 类指标做差值处理:用上一轮缓存值算增量/速率,写回 frames
 	s.applyDelta(frames)
+	for _, f := range frames {
+		aggregateMultiLane(f)
+	}
 
 	// 统计每个节点(sn)上聚合到的 GPU 数量,供拓扑同步时更新节点的卡数
 	nodeGPUCount := map[string]int{}

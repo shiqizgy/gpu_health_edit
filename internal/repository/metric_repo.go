@@ -33,19 +33,19 @@ type MetricQuery struct {
 func (r *MetricRepo) List(q MetricQuery) ([]model.MetricDefinition, int64, error) {
 	tx := r.db.Model(&model.MetricDefinition{})
 	if q.OwnerSubject != 0 {
-		tx = tx.Where("owner_subject = ?", q.OwnerSubject)
+		tx = tx.Where("owner_subject_code = ?", q.OwnerSubject)
 	}
 	if q.HealthPurpose != 0 {
-		tx = tx.Where("health_purpose = ?", q.HealthPurpose)
+		tx = tx.Where("health_purpose_code = ?", q.HealthPurpose)
 	}
 	if q.Dimension != "" {
 		tx = tx.Where("dimension = ?", q.Dimension)
 	}
 	if q.CardType != "" {
-		tx = tx.Where("device_type = ?", q.CardType)
+		tx = tx.Where("card_type = ?", q.CardType)
 	}
 	if q.ValueType != 0 {
-		tx = tx.Where("value_type = ?", q.ValueType)
+		tx = tx.Where("value_type_code = ?", q.ValueType)
 	}
 	if q.HealthKeyOnly {
 		tx = tx.Where("is_health_key = ?", true)
@@ -82,36 +82,35 @@ func (r *MetricRepo) Create(m *model.MetricDefinition) error {
 }
 
 func (r *MetricRepo) Update(id uint64, m *model.MetricDefinition) error {
-	// 用 map 显式指定可更新字段，避免 GORM 对零值字段跳过更新
 	return r.db.Model(&model.MetricDefinition{ID: id}).Updates(map[string]any{
-		"seq_no":           m.SeqNo,
-		"official_num":     m.OfficialNum,
-		"card_type":        m.CardType,
-		"metric_name":      m.MetricName,
-		"concept":          m.Conception,
-		"unit":             m.Unit,
-		"dimension":        m.Dimension,
-		"owner_subject":    m.OwnerSubject,
-		"health_purpose":   m.HealthPurpose,
-		"value_type":       m.ValueType,
-		"work_range":       m.WorkRange,
-		"upper_bond":       m.UpperBond,
-		"lower_bound":      m.LowerBound,
-		"warn_upbound":     m.WarnupBound,
-		"warn_lowbound":    m.WarnlowBound,
-		"normal_rate":      m.NormalRate,
-		"warn_rate":        m.WarnRate,
-		"normal_rate_unit": m.NormalRateUnit,
-		"bool_normal":      m.BoolNormal,
-		"bool_abnormal":    m.BoolAbnormal,
-		"enum_result":      m.EnumResult,
-		"enum_score":       m.EnumScore,
-		"is_veto":          m.IsVeto,
-		"derate_threshold": m.DerateThreshold,
-		"source_ref":       m.SourceRef,
-		"vendor":           m.Vendor,
-		"remark":           m.Remark,
-		"is_health_key":    m.IsHealthKey,
+		"seq_no":              m.SeqNo,
+		"official_no":         m.OfficialNum,
+		"card_type":           m.CardType,
+		"metric_name":         m.MetricName,
+		"concept":             m.Conception,
+		"unit":                m.Unit,
+		"dimension":           m.Dimension,
+		"owner_subject_code":  m.OwnerSubject,
+		"health_purpose_code": m.HealthPurpose,
+		"value_type_code":     m.ValueType,
+		"work_range":          m.WorkRange,
+		"upper_bound":         m.UpperBond,
+		"lower_bound":         m.LowerBound,
+		"alert_upper":         m.WarnupBound,
+		"alert_lower":         m.WarnlowBound,
+		"normal_rate":         m.NormalRate,
+		"alert_rate":          m.WarnRate,
+		"rate_unit":           m.NormalRateUnit,
+		"bool_normal":         m.BoolNormal,
+		"bool_abnormal":       m.BoolAbnormal,
+		"enum_result":         m.EnumResult,
+		"enum_score":          m.EnumScore,
+		"is_veto":             m.IsVeto,
+		"derate_threshold":    m.DerateThreshold,
+		"source_ref":          m.SourceRef,
+		"vendor":              m.Vendor,
+		"remark":              m.Remark,
+		"is_health_key":       m.IsHealthKey,
 	}).Error
 }
 

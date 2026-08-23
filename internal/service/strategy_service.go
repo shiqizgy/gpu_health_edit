@@ -121,10 +121,6 @@ func (s *StrategyService) Compile(strategy *model.ScoringStrategy) (*scoring.Com
 			strategy.Code, len(neverPenalized), neverPenalized)
 
 	}
-	if len(neverPenalized) > 0 {
-		logger.L.Warnf("策略 %s 有 %d 个指标缺少评分边界，将恒定满分: %v",
-			strategy.Code, len(neverPenalized), neverPenalized)
-	}
 
 	return &scoring.CompiledStrategy{
 		StrategyID:       strategy.ID,
