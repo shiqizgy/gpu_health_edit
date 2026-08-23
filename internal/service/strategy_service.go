@@ -71,6 +71,7 @@ func (s *StrategyService) Compile(strategy *model.ScoringStrategy) (*scoring.Com
 			Weight:    rule.Weight,
 			Bounds: scoring.MetricBounds{
 				ValueType:    def.ValueType,
+				IsRate:       scoring.IsRateUnit(def.NormalRateUnit),
 				UpperBond:    def.UpperBond,
 				LowerBound:   def.LowerBound,
 				WarnupBound:  def.WarnupBound,
@@ -106,33 +107,24 @@ func (s *StrategyService) Compile(strategy *model.ScoringStrategy) (*scoring.Com
 		}
 	}
 
-	//var neverPenalized []string
-	//for k, r := range rules {
-	//	if k == xidMetricKey {
-	//		continue
-	//	}
-	//	b := r.Bounds
-	//	dead := false
-	//	switch b.ValueType {
-	//	case VTOther:
-	//		dead = true
-	//	case VTOrdinal:
-	//		dead = b.EnumScore == nil
-	//	case VTGauge, VTGaugeRate:
-	//		dead = b.UpperBond == nil && b.LowerBound == nil
-	//	case VTCounter, VTDuration, VTLevel:
-	//		dead = b.NormalRate == nil
-	//	case VTBool:
-	//		dead = b.BoolNormal == "" && b.BoolAbnormal == ""
-	//	}
-	//	if dead {
-	//		neverPenalized = append(neverPenalized, k)
-	//	}
-	//}
-	//if len(neverPenalized) > 0 {
-	//	logger.L.Warnf("策略 %s 有 %d 个指标缺少评分边界，将恒定满分: %v",
-	//		strategy.Code, len(neverPenalized), neverPenalized)
-	//}
+	var neverPenalized []string
+	for k, r := range rules {
+		if k == "DCGM_FI_DEV_XID_ERRORS" {
+			continue // XID 走专用查表
+		}
+		if !r.Bounds.IsScorable() {
+			neverPenalized = append(neverPenalized, k)
+		}
+	}
+	if len(neverPenalized) > 0 {
+		logger.L.Warnf("策略 %s 有 %d 个参与评分的指标缺少边界，将恒定满分: %v",
+			strategy.Code, len(neverPenalized), neverPenalized)
+
+	}
+	if len(neverPenalized) > 0 {
+		logger.L.Warnf("策略 %s 有 %d 个指标缺少评分边界，将恒定满分: %v",
+			strategy.Code, len(neverPenalized), neverPenalized)
+	}
 
 	return &scoring.CompiledStrategy{
 		StrategyID:       strategy.ID,

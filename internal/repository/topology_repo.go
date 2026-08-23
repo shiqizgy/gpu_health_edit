@@ -118,6 +118,7 @@ type GPUWithStrategy struct {
 	UUID              string  `gorm:"column:uuid"`
 	ClusterID         uint64  `gorm:"column:cluster_id"`
 	Vendor            string  `gorm:"column:vendor"`
+	CardType          string  `gorm:"column:card_type"`
 	CardStrategyID    *uint64 `gorm:"column:card_strategy_id"`
 	ClusterStrategyID *uint64 `gorm:"column:cluster_strategy_id"`
 }
@@ -126,7 +127,7 @@ type GPUWithStrategy struct {
 func (r *TopologyRepo) AllOnlineGPUsWithStrategy() ([]GPUWithStrategy, error) {
 	var out []GPUWithStrategy
 	err := r.db.Table("gpu_card AS g").
-		Select("g.uuid, g.cluster_id, g.strategy_id AS card_strategy_id, c.strategy_id AS cluster_strategy_id").
+		Select("g.uuid, g.cluster_id, g.strategy_id, g.card_type AS card_strategy_id, c.strategy_id AS cluster_strategy_id").
 		Joins("JOIN cluster c ON c.id = g.cluster_id").
 		Where("g.status = ?", "online").
 		Scan(&out).Error

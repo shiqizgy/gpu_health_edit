@@ -109,7 +109,7 @@ func (r *MetricRepo) Update(id uint64, m *model.MetricDefinition) error {
 		"is_veto":          m.IsVeto,
 		"derate_threshold": m.DerateThreshold,
 		"source_ref":       m.SourceRef,
-		"vender":           m.Vender,
+		"vendor":           m.Vendor,
 		"remark":           m.Remark,
 		"is_health_key":    m.IsHealthKey,
 	}).Error

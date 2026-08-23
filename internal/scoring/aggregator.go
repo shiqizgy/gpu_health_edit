@@ -276,7 +276,7 @@ func itoa(n int) string {
 
 // 致命 XID 集合：命中即一票否决（ECC/行重映射/掉总线/内部硬件与总线错误等）。
 var xidFatalSet = map[int]bool{
-	48: true, 62: true, 63: true, 64: true, 69: true, 74: true, 79: true,
+	48: true, 61: true, 62: true, 63: true, 64: true, 69: true, 74: true, 79: true,
 	94: true, 95: true, 110: true, 119: true, 120: true, 123: true,
 	140: true, 143: true, 154: true, 167: true, 169: true, 171: true, 172: true,
 }
@@ -288,9 +288,11 @@ var xidWarnSet = map[int]bool{
 	109: true, 137: true,
 }
 
+var xidAppSideSet = map[int]bool{}
+
 // xidScore：0→健康；warn 集→警告；fatal 集→故障（并在聚合层触发否决）；其他→警告。
 func xidScore(code int) float64 {
-	if code == 0 {
+	if code == 0 || xidAppSideSet[code] {
 		return ScoreHealthy
 	}
 	if xidFatalSet[code] {

@@ -71,7 +71,7 @@ func (s *ScorerService) RunOnceWith(ctx context.Context, frames []types.MetricFr
 	//策略ID的优先级选择：卡级CardStrategyID > 集群级ClusterStrategyID，都没有则 sid=nil（后续走 vendor 或默认）。
 	type binding struct {
 		clusterID  uint64
-		vendor     string
+		cardType   string
 		strategyID *uint64
 	}
 	bindOf := make(map[string]binding, len(gpus))
@@ -82,7 +82,7 @@ func (s *ScorerService) RunOnceWith(ctx context.Context, frames []types.MetricFr
 		} else if g.ClusterStrategyID != nil {
 			sid = g.ClusterStrategyID
 		}
-		bindOf[g.UUID] = binding{clusterID: g.ClusterID, vendor: g.Vendor, strategyID: sid}
+		bindOf[g.UUID] = binding{clusterID: g.ClusterID, cardType: g.CardType, strategyID: sid}
 	}
 
 	compiledCache := map[uint64]*scoring.CompiledStrategy{}
@@ -125,7 +125,7 @@ func (s *ScorerService) RunOnceWith(ctx context.Context, frames []types.MetricFr
 					if cs, ok := compiledCache[*b.strategyID]; ok {
 						compiled = cs
 					}
-				} else if cs, ok := vendorCompiled[b.vendor]; ok {
+				} else if cs, ok := vendorCompiled[b.cardType]; ok {
 					compiled = cs
 				}
 			}
@@ -144,9 +144,9 @@ func (s *ScorerService) RunOnceWith(ctx context.Context, frames []types.MetricFr
 				Breakdown:  scoring.BreakdownJSON(result),
 				ScoredAt:   now,
 			}
-			if result.Level != "healthy" {
-				snap.Breakdown = scoring.BreakdownJSON(result)
-			}
+			//if result.Level != "healthy" {
+			//	snap.Breakdown = scoring.BreakdownJSON(result)
+			//}
 			snaps[i] = snap
 		}
 	})

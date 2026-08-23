@@ -18,7 +18,7 @@ CREATE TABLE `strategy_metric_rule` (
   UNIQUE KEY `idx_strategy_metric` (`strategy_id`,`metric_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-DELETE FROM `scoring_strategy` WHERE code IN ('default','npu_default');
+DELETE FROM `scoring_strategy` WHERE code IN ('DCGM_default','npu_default');
 
 -- ---------- GPU / DCGM 默认策略（7 维，和 = 1.000）----------
 INSERT INTO `scoring_strategy`
@@ -91,5 +91,5 @@ UPDATE metric_definition SET enum_score =
 WHERE metric_name IN (
   'npu_chip_info_health_status','npu_chip_info_error_code','健康告警码（error code）',
   'npu_chip_info_network_status','hccs health status');
-PCIE_MAX_LINK_GEN / MAX_LINK_WIDTH 是设备常量，不用配，它们的 health_purpose=2（归因）权重本来就低。
+-- PCIE_MAX_LINK_GEN / MAX_LINK_WIDTH 是设备常量，不用配，它们的 health_purpose=2（归因）权重本来就低。
 

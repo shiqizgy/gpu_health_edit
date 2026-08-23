@@ -12,6 +12,7 @@ import (
 	"github.com/gpu-health/platform/internal/config"
 	"github.com/gpu-health/platform/internal/model"
 	"github.com/gpu-health/platform/internal/repository"
+	"github.com/gpu-health/platform/internal/scoring"
 	"github.com/gpu-health/platform/internal/types"
 	"github.com/gpu-health/platform/pkg/logger"
 	"gorm.io/gorm/clause"
@@ -90,64 +91,49 @@ func gpuUUID(sn, tags string) string { return sn + ":" + tags }
 
 func normalizeMIB(mib string) string { return mib }
 
-func detectVendor(metrics map[string]float64) string {
+// detectDevice 返回 (vendor, cardType)
+func detectDevice(metrics map[string]float64) (string, string) {
 	dcgm, npu := 0, 0
 	for key := range metrics {
-		if strings.HasPrefix(key, "DCGM_FI_") {
+		switch {
+		case strings.HasPrefix(key, "DCGM_"):
 			dcgm++
-		}
-		if strings.HasPrefix(key, "npu_chip_") || strings.HasPrefix(key, "container_npu_") {
+		case strings.HasPrefix(key, "npu_"), strings.HasPrefix(key, "container_npu_"):
 			npu++
 		}
 	}
-	if npu > dcgm {
-		return "huawei"
+	if npu > dcgm && npu > 0 {
+		return "huawei", "NPU"
 	}
 	if dcgm > 0 {
-		return "nvidia"
+		return "nvidia", "GPU"
 	}
-	return "unknown"
-}
-
-// 窗口型单位(低频累计)：按目标周期滑动累计
-var windowUnitSeconds = map[string]float64{
-	"次/天": 86400, "次/小时": 3600, "次/分钟": 60,
-	"页/天": 86400, "行/天": 86400, "块/月": 2592000,
-}
-
-// 瞬时速率型单位(高频)：按每秒速率
-var rateUnitSeconds = map[string]float64{
-	"μs/s": 1, "次/秒": 1, "页/秒": 1,
+	return "unknown", "" // ★ 空字符串 = 判不出来
 }
 
 func (s *CKLoaderService) loadCounterKeys() {
 	var defs []model.MetricDefinition
-	if err := s.metricRepo.DB().Where("value_type IN ?", []int{3, 4, 5}).Find(&defs).Error; err != nil {
+	if err := s.metricRepo.DB().Where("value_type IN ?", []int{3, 4, 5}).Where("score_scope > 0").Find(&defs).Error; err != nil {
 		logger.L.Warnf("加载 counter 类指标失败: %v", err)
 		return
 	}
 	m := make(map[string]counterMeta, len(defs))
+	var levelKeys []string
 	for _, d := range defs {
-		unit := strings.TrimSpace(d.NormalRateUnit)
-		meta := counterMeta{valueScale: 1}
-		// 时长类(value_type=4) μs → s
-		if d.ValueType == 4 {
-			meta.valueScale = 1e-6
+		sec, scale, isRate := scoring.ParseRateUnit(d.NormalRateUnit)
+		if !isRate {
+			levelKeys = append(levelKeys, d.MetricName)
+			continue // ★ 存量型不入 counterKeys，保持原始累计值
 		}
-		if w, ok := windowUnitSeconds[unit]; ok {
-			meta.useWindow = true
-			meta.windowSeconds = w
-		} else if r, ok := rateUnitSeconds[unit]; ok {
-			meta.useWindow = false
-			meta.windowSeconds = r
-		} else {
-			// 未识别单位：默认瞬时速率/秒，避免误判
-			meta.useWindow = false
-			meta.windowSeconds = 1
+		m[d.MetricName] = counterMeta{
+			valueScale:    scale,
+			windowSeconds: sec,
+			useWindow:     sec >= 60, // ≥1分钟按滑动窗口累计，否则按每秒速率
 		}
-		m[d.MetricName] = meta
 	}
 	s.counterKeys = m
+	logger.L.Infof("counter 指标加载完成：速率型 %d 个，存量型 %d 个（不做增量转换）：%v",
+		len(m), len(levelKeys), levelKeys)
 }
 
 // 将“累计计数”类指标转换为“增长速率”
@@ -200,6 +186,94 @@ func (s *CKLoaderService) applyDelta(frames map[string]*types.MetricFrame) {
 	}
 	s.prevValues = newPrev
 	s.prevTS = newPrevTS
+}
+
+// 关于npu中通道等指标的聚合
+var multiLaneGroups = map[string][]string{
+	"npu_chip_info_hccs_crc_err_cnt_max": {
+		"npu_chip_info_hccs_statistic_info_crc_err_cnt_1",
+		"npu_chip_info_hccs_statistic_info_crc_err_cnt_2",
+		"npu_chip_info_hccs_statistic_info_crc_err_cnt_3",
+		"npu_chip_info_hccs_statistic_info_crc_err_cnt_4",
+		"npu_chip_info_hccs_statistic_info_crc_err_cnt_5",
+		"npu_chip_info_hccs_statistic_info_crc_err_cnt_6",
+		"npu_chip_info_hccs_statistic_info_crc_err_cnt_7",
+	},
+	"npu_chip_info_hccs_bandwidth_info_tx_max": { //HCCS链路单链路发送带宽
+		"npu_chip_info_hccs_bandwidth_info_tx_1",
+		"npu_chip_info_hccs_bandwidth_info_tx_2",
+		"npu_chip_info_hccs_bandwidth_info_tx_3",
+		"npu_chip_info_hccs_bandwidth_info_tx_4",
+		"npu_chip_info_hccs_bandwidth_info_tx_5",
+		"npu_chip_info_hccs_bandwidth_info_tx_6",
+		"npu_chip_info_hccs_bandwidth_info_tx_7",
+	},
+	"npu_chip_info_hccs_bandwidth_info_rx_max": { //HCCS链路单链路接收带宽
+		"npu_chip_info_hccs_bandwidth_info_rx_1",
+		"npu_chip_info_hccs_bandwidth_info_rx_2",
+		"npu_chip_info_hccs_bandwidth_info_rx_3",
+		"npu_chip_info_hccs_bandwidth_info_rx_4",
+		"npu_chip_info_hccs_bandwidth_info_rx_5",
+		"npu_chip_info_hccs_bandwidth_info_rx_6",
+		"npu_chip_info_hccs_bandwidth_info_rx_7",
+	},
+	"npu_chip_optical_tx_power_max": { //光模块通道发送光功率
+		"npu_chip_optical_tx_power_0",
+		"npu_chip_optical_tx_power_1",
+		"npu_chip_optical_tx_power_2",
+		"npu_chip_optical_tx_power_3",
+	},
+	"npu_chip_optical_rx_power_max": { //光模块通道接收光功率
+		"npu_chip_optical_rx_power_0",
+		"npu_chip_optical_rx_power_1",
+		"npu_chip_optical_rx_power_2",
+		"npu_chip_optical_rx_power_3",
+	},
+	"npu_chip_info_hccs_statistic_info_tx_cnt_max": { //HCCS链路发送报文数(采集失败-i)
+		"npu_chip_info_hccs_statistic_info_tx_cnt_1",
+		"npu_chip_info_hccs_statistic_info_tx_cnt_2",
+		"npu_chip_info_hccs_statistic_info_tx_cnt_3",
+		"npu_chip_info_hccs_statistic_info_tx_cnt_4",
+		"npu_chip_info_hccs_statistic_info_tx_cnt_5",
+		"npu_chip_info_hccs_statistic_info_tx_cnt_6",
+		"npu_chip_info_hccs_statistic_info_tx_cnt_7",
+	},
+	"npu_chip_info_hccs_statistic_info_rx_cnt": { //HCCS链路接收报文数
+		"npu_chip_info_hccs_statistic_info_rx_cnt_1",
+		"npu_chip_info_hccs_statistic_info_rx_cnt_2",
+		"npu_chip_info_hccs_statistic_info_rx_cnt_3",
+		"npu_chip_info_hccs_statistic_info_rx_cnt_4",
+		"npu_chip_info_hccs_statistic_info_rx_cnt_5",
+		"npu_chip_info_hccs_statistic_info_rx_cnt_6",
+		"npu_chip_info_hccs_statistic_info_rx_cnt_7",
+	},
+	"npu_chip_info_hccs_statistic_info_crc_err_cnt_max": {
+		"npu_chip_info_hccs_statistic_info_crc_err_cnt_1",
+		"npu_chip_info_hccs_statistic_info_crc_err_cnt_2",
+		"npu_chip_info_hccs_statistic_info_crc_err_cnt_3",
+		"npu_chip_info_hccs_statistic_info_crc_err_cnt_4",
+		"npu_chip_info_hccs_statistic_info_crc_err_cnt_5",
+		"npu_chip_info_hccs_statistic_info_crc_err_cnt_6",
+		"npu_chip_info_hccs_statistic_info_crc_err_cnt_7",
+	},
+}
+
+func aggregateMultiLane(f *types.MetricFrame) {
+	for agg, members := range multiLaneGroups {
+		worst, found := 0.0, false
+		for _, m := range members {
+			if v, ok := f.Metrics[m]; ok {
+				found = true
+				if v > worst {
+					worst = v
+				}
+			}
+			delete(f.Metrics, m) // 原始项不参与评分，但保留在 CK 里供排查
+		}
+		if found {
+			f.Metrics[agg] = worst
+		}
+	}
 }
 
 // windowSum 把本次增量记入历史，并返回 [now-window, now] 窗口内的累计增量
@@ -492,10 +566,15 @@ func (s *CKLoaderService) syncTopologyBatch(metas map[string]meta, frames map[st
 			continue
 		}
 		idx, _ := strconv.Atoi(m.tags)
-		vendor := detectVendor(frames[uuid].Metrics)
+		vendor, cardType := detectDevice(frames[uuid].Metrics)
+		if cardType == "" {
+			logger.L.Warnf("卡 %s 无法识别设备类型（指标数=%d），本轮跳过评分",
+				uuid, len(frames[uuid].Metrics))
+			continue // ★ 判不出来就别入库，更别去评分
+		}
 		gpus = append(gpus, model.GPUCard{
 			UUID: uuid, NodeID: entry.id, ClusterID: cid,
-			GPUIndex: idx, SN: m.sn, Status: "online", Vendor: vendor,
+			GPUIndex: idx, SN: m.sn, Status: "online", Vendor: vendor, CardType: cardType,
 		})
 	}
 	if len(gpus) > 0 {

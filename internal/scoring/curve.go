@@ -32,7 +32,8 @@ type EnumScoreRule struct {
 
 // MetricBounds 单指标评分所需的全部边界（编译策略时从 MetricDefinition 填充）。
 type MetricBounds struct {
-	ValueType int // 原始 value_type（含中文），用前缀判定
+	ValueType int  // 原始 value_type（含中文），用前缀判定
+	IsRate    bool //  累计类是速率型还是存量型（由 rate_unit 有无时间分母决定）
 
 	// 连续数值 / 比率：四边界
 	UpperBond    *float64 // 正常上限
@@ -70,7 +71,10 @@ func ScoreByType(b MetricBounds, value float64) float64 {
 	case VTGauge, VTGaugeRate:
 		return scoreRange(b, value) //todo 调整算法
 	case VTCounter, VTDuration, VTLevel:
-		return scoreRate(b.NormalRate, b.WarnRate, value)
+		if b.IsRate {
+			return scoreRate(b.NormalRate, b.WarnRate, value)
+		}
+		return scoreRange(b, value)
 	case VTBool:
 		return scoreBool(b.BoolNormal, b.BoolAbnormal, value)
 	case VTOrdinal:
@@ -80,6 +84,53 @@ func ScoreByType(b MetricBounds, value float64) float64 {
 	default: // VTGauge 及未知
 		return scoreRange(b, value)
 	}
+}
+
+func IsRateUnit(unit string) bool {
+	_, _, ok := parseRateUnit(unit)
+	return ok
+}
+
+// 时间分母 → 秒数。窗口型(≥60s)按滑动窗口累计，瞬时型(<60s)按每秒速率。
+var denomSeconds = map[string]float64{
+	"秒": 1, "s": 1, "S": 1,
+	"分钟": 60, "min": 60,
+	"小时": 3600, "h": 3600, "H": 3600,
+	"天": 86400, "d": 86400, "D": 86400,
+	"周": 604800, "月": 2592000,
+}
+
+// parseRateUnit 解析速率单位。
+// 返回 (窗口秒数, 值缩放, 是否速率型)
+//
+//	"次/天"  → (86400, 1,    true)
+//	"μs/s"   → (1,     1e-6, true)
+//	"次"     → (0,     1,    false)   ← 存量型
+//	""       → (0,     1,    false)
+func parseRateUnit(unit string) (float64, float64, bool) {
+	unit = strings.TrimSpace(unit)
+	if unit == "" {
+		return 0, 1, false
+	}
+	i := strings.Index(unit, "/")
+	if i < 0 {
+		return 0, 1, false // 没有分母 → 存量型
+	}
+	numer, denom := unit[:i], strings.TrimSpace(unit[i+1:])
+	sec, ok := denomSeconds[denom]
+	if !ok {
+		return 0, 1, false // 分母不是时间（如 GB/s 的 s 会命中，但 次/包 之类不会）
+	}
+	scale := 1.0
+	if strings.HasPrefix(numer, "μs") || strings.HasPrefix(numer, "us") {
+		scale = 1e-6 // μs → s
+	}
+	return sec, scale, true
+}
+
+// ParseRateUnit 导出封装，供外部包调用。
+func ParseRateUnit(unit string) (float64, float64, bool) {
+	return parseRateUnit(unit)
 }
 
 // scoreRange 连续数值 / 比率类：四个边界三个区间。
@@ -105,25 +156,32 @@ func scoreRange(b MetricBounds, v float64) float64 {
 
 // scoreRate 累计类增长速率(数据层已转采样窗口增量)：三档。
 func scoreRate(normalRate, warnRate *float64, v float64) float64 {
-	if normalRate != nil && v > *normalRate {
-		if warnRate != nil && v > *warnRate {
-			return ScoreCritical
-		}
-		return ScoreWarning
+	if normalRate == nil {
+		return ScoreHealthy // 未配置速率阈值 → 不扣分（Compile 时已有日志提示）
 	}
-	return ScoreHealthy
+	if v <= *normalRate {
+		return ScoreHealthy
+	}
+	if warnRate == nil || v > *warnRate {
+		return ScoreCritical
+	}
+	return ScoreWarning
 }
 
 // scoreBool 布尔：命中正常值→100，命中异常值→20，无法判定→不扣分。
 func scoreBool(normal, abnormal string, v float64) float64 {
 	cur := boolToken(v)
-	if abnormal != "" && cur == strings.TrimSpace(abnormal) {
+	normal, abnormal = strings.TrimSpace(normal), strings.TrimSpace(abnormal)
+	if abnormal != "" && cur == abnormal {
 		return ScoreCritical
 	}
-	if normal != "" && cur == strings.TrimSpace(normal) {
+	if normal != "" && cur == normal {
 		return ScoreHealthy
 	}
-	return ScoreHealthy
+	if normal == "" && abnormal == "" {
+		return ScoreHealthy // 未配置正常/异常值 → 不扣分
+	}
+	return ScoreWarning // ★ 配了但落在定义之外 → 状态未知，判警告
 }
 
 func boolToken(v float64) string {
@@ -183,4 +241,24 @@ func scoreEnum(r *EnumScoreRule, v float64) float64 {
 		}
 		return ScoreHealthy
 	}
+}
+
+// IsScorable 判断该指标在当前边界配置下是否可能扣分。
+func (b MetricBounds) IsScorable() bool {
+	switch b.ValueType {
+	case VTOther:
+		return false
+	case VTOrdinal:
+		return b.EnumScore != nil
+	case VTGauge, VTGaugeRate:
+		return b.UpperBond != nil || b.LowerBound != nil
+	case VTCounter, VTDuration, VTLevel:
+		if b.IsRate {
+			return b.NormalRate != nil
+		}
+		return b.UpperBond != nil
+	case VTBool:
+		return b.BoolNormal != "" || b.BoolAbnormal != ""
+	}
+	return true
 }

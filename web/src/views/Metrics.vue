@@ -80,7 +80,7 @@
             <n-form-item label="工作范围"><n-input v-model:value="form.work_range" placeholder="20~85" /></n-form-item>
           </n-gi>
           <n-gi>
-            <n-form-item label="厂商"><n-input v-model:value="form.vender" placeholder="NVIDIA / 华为昇腾" /></n-form-item>
+            <n-form-item label="厂商"><n-input v-model:value="form.vendor" placeholder="NVIDIA / 华为昇腾" /></n-form-item>
           </n-gi>
 
           <n-gi>
@@ -175,7 +175,7 @@ const npuDims = [
   { label: "功耗电源",         value: "power功耗电源" },
 ];
 
-const dimOptions = computed(() => (pageDevice.value === "npu" ? npuDims : gpuDims));
+const dimOptions = computed(() => (pageCardType.value === "npu" ? npuDims : gpuDims));
 const dimLabels: Record<string, string> = Object.fromEntries(
   [...gpuDims, ...npuDims].map((d) => [d.value, d.label])
 );
@@ -236,7 +236,7 @@ const total = ref(0);
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)));
 
 function emptyForm() {
-  const isNpu = pageDevice.value === "NPU";
+  const isNpu = pageCardType.value === "NPU";
   return {
     id: 0, seq_no: null, metric_name: "", official_num: "",
     card_type: isNpu ? "NPU" : "GPU",
@@ -247,7 +247,7 @@ function emptyForm() {
     normal_rate: null, warn_rate: null, normal_rate_unit: "",
     bool_normal: "", bool_abnormal: "", enum_result: "",enum_score: "",
     concept: "", is_veto: 0, derate_threshold: "", source_ref: "",
-    vender: isNpu ? "华为昇腾" : "NVIDIA",
+    vendor: isNpu ? "华为昇腾" : "NVIDIA",
     remark: "", is_health_key: true,
   };
 }
@@ -265,8 +265,8 @@ const columns = [
     render: (r: any) => h("span", { class: "mono", style: "font-size:12px;color:#9aa7b4" }, r.metric_name) },
   { title: "官方编号", key: "official_num", width: 170, ellipsis: { tooltip: true } },
   { title: "卡类型", key: "card_type", width: 70 },
-  { title: "厂商", key: "vender", width: 90 },
-  { title: "维度", key: "dimension", width: 110,f
+  { title: "厂商", key: "vendor", width: 90 },
+  { title: "维度", key: "dimension", width: 110,
     render: (r: any) => h(NTag, { size: "small", bordered: false }, () => dimLabels[r.dimension] || r.dimension) },
   { title: "数值类型", key: "value_type", width: 130,
     render: (r: any) => vtLabels[r.value_type] || r.value_type },

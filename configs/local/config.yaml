@@ -19,10 +19,10 @@ redis:
 
 scorer:
   cron: "@every 1m"          # 每分钟评分一次
-  strategy_code: "default"
-  vendor_strategy:
-    nvidia: "default"
-    huawei: "npu_default"
+  strategy_code: "DCGM_default"
+  card_type_strategy:
+    GPU: "DCGM_default"
+    NPU: "npu_default"
   workers: 0
 
 simulator:
