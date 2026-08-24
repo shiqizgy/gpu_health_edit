@@ -127,7 +127,8 @@ type GPUWithStrategy struct {
 func (r *TopologyRepo) AllOnlineGPUsWithStrategy() ([]GPUWithStrategy, error) {
 	var out []GPUWithStrategy
 	err := r.db.Table("gpu_card AS g").
-		Select("g.uuid, g.cluster_id, g.strategy_id, g.card_type AS card_strategy_id, c.strategy_id AS cluster_strategy_id").
+		Select("g.uuid, g.cluster_id, g.vendor, g.card_type, "+
+			"g.strategy_id AS card_strategy_id, c.strategy_id AS cluster_strategy_id").
 		Joins("JOIN cluster c ON c.id = g.cluster_id").
 		Where("g.status = ?", "online").
 		Scan(&out).Error

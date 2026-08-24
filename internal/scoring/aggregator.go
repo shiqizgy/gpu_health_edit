@@ -76,7 +76,7 @@ type vetoState struct {
 //  3. 维度间加权平均：总分 = Σ(维度分×维度权重)
 //  4. 一票否决"后封顶"：命中否决的维度分与整卡总分都锁到 VetoFloor
 
-const MinCoverage = 0.6 // 覆盖率低于此值不给出可信分数
+const MinCoverage = 0 // 覆盖率低于此值不给出可信分数
 func Score(metrics map[string]float64, strategy *CompiledStrategy) Result {
 	dims, veto := accumulate(metrics, strategy)
 
@@ -245,6 +245,7 @@ func BreakdownJSON(r Result) string {
 	b, _ := json.Marshal(map[string]any{
 		"veto":        r.Veto,
 		"veto_reason": r.VetoReason,
+		"coverage":    r.Coverage,
 		"dimensions":  r.Dimensions,
 	})
 	return string(b)

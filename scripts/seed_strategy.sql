@@ -45,4 +45,4 @@ FROM accel_metric_scoring WHERE card_type = 'NPU' AND is_health_key = 1;
 SELECT s.code, s.name, COUNT(r.id) AS rule_cnt
 FROM scoring_strategy s LEFT JOIN strategy_metric_rule r ON r.strategy_id = s.id
 GROUP BY s.id;
-执行顺序（podman-seed.sh）：accel_metric_scoring.sql → 003_metric_patch.sql → seed_strategy.sql → seed_fault_pool.sql。
+--执行顺序（podman-seed.sh）：accel_metric_scoring.sql → 003_metric_patch.sql → seed_strategy.sql → seed_fault_pool.sql。

@@ -82,9 +82,9 @@ CREATE TABLE `accel_metric_scoring` (
     `derate_threshold`    TEXT            NULL COMMENT '降频/关机阈值（关键分档阈值）',
     `source_ref`          TEXT            NULL COMMENT '来源依据（出处）',
     `vendor`              VARCHAR(32)     NULL COMMENT '厂商：NVIDIA / 华为昇腾',
-    'enum_score'          JSON            NULL COMMENT '枚举/位掩码评分规则',
-    'remark'              VARCHAR(255)    NULL COMMENT '备注',
-    'is_healthy_key'      TINYINT(1)      NOT NULL DEFAULT COMMENT '是否参与健康评分'
+    `enum_score`          JSON            NULL COMMENT '枚举/位掩码评分规则（见 scoring/curve.go）',
+    `remark`              VARCHAR(255)    NULL COMMENT '备注',
+    `is_health_key`       TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '是否参与健康评分：1参与 0不参与',
     `created_at`          TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at`          TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),

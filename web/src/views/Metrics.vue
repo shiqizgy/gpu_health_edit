@@ -163,6 +163,7 @@ const gpuDims = [
   { label: "功耗电源",       value: "power功耗电源" },
   { label: "驱动",           value: "driver驱动（DCGM）" },
   { label: "PCIe总线",       value: "pcie总线" },
+  { label: "运行稳定",       value: "stability运行稳定" },
 ];
 const npuDims = [
   { label: "昇腾互连通信",     value: "interconnect昇腾互连通信" },

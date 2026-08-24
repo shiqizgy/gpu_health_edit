@@ -13,13 +13,13 @@ import (
 )
 
 type ScorerService struct {
-	health         *repository.HealthRepo
-	topo           *repository.TopologyRepo
-	strategy       *StrategyService
-	strategyCode   string
-	vendorStrategy map[string]string
-	faultDetect    *FaultDetectService
-	pool           *pool.Pool
+	health           *repository.HealthRepo
+	topo             *repository.TopologyRepo
+	strategy         *StrategyService
+	strategyCode     string
+	cardTypeStrategy map[string]string
+	faultDetect      *FaultDetectService
+	pool             *pool.Pool
 }
 
 func NewScorerService(
@@ -27,21 +27,21 @@ func NewScorerService(
 	topo *repository.TopologyRepo,
 	strategy *StrategyService,
 	strategyCode string,
-	vendorStrategy map[string]string,
+	cardTypeStrategy map[string]string, //vendorStrategy map[string]string,
 	faultDetect *FaultDetectService,
 	p *pool.Pool,
 ) *ScorerService {
-	if vendorStrategy == nil {
-		vendorStrategy = map[string]string{}
+	if cardTypeStrategy == nil {
+		cardTypeStrategy = map[string]string{}
 	}
 	return &ScorerService{
-		health:         health,
-		topo:           topo,
-		strategy:       strategy,
-		strategyCode:   strategyCode,
-		vendorStrategy: vendorStrategy,
-		faultDetect:    faultDetect,
-		pool:           p,
+		health:           health,
+		topo:             topo,
+		strategy:         strategy,
+		strategyCode:     strategyCode,
+		cardTypeStrategy: cardTypeStrategy,
+		faultDetect:      faultDetect,
+		pool:             p,
 	}
 }
 
@@ -101,14 +101,14 @@ func (s *ScorerService) RunOnceWith(ctx context.Context, frames []types.MetricFr
 		compiledCache[*b.strategyID] = cs
 	}
 
-	vendorCompiled := map[string]*scoring.CompiledStrategy{}
-	for vendor, code := range s.vendorStrategy {
+	cardTypeCompiled := map[string]*scoring.CompiledStrategy{}
+	for cardType, code := range s.cardTypeStrategy {
 		cs, err := s.strategy.GetCompiled(code)
 		if err != nil {
-			logger.L.Warnf("vendor=%s 策略 code=%s 编译失败: %v", vendor, code, err)
+			logger.L.Warnf("card_type=%s 策略 code=%s 编译失败: %v", cardType, code, err)
 			continue
 		}
-		vendorCompiled[vendor] = cs
+		cardTypeCompiled[cardType] = cs
 	}
 
 	now := time.Now()
@@ -125,7 +125,7 @@ func (s *ScorerService) RunOnceWith(ctx context.Context, frames []types.MetricFr
 					if cs, ok := compiledCache[*b.strategyID]; ok {
 						compiled = cs
 					}
-				} else if cs, ok := vendorCompiled[b.cardType]; ok {
+				} else if cs, ok := cardTypeCompiled[b.cardType]; ok {
 					compiled = cs
 				}
 			}
@@ -173,6 +173,6 @@ func (s *ScorerService) RunOnceWith(ctx context.Context, frames []types.MetricFr
 	}
 
 	logger.L.Infof("评分完成：%d 张卡(用到 %d 个非默认策略, %d 个vendor策略),耗时 %s",
-		len(snaps), len(compiledCache), len(vendorCompiled), time.Since(start))
+		len(snaps), len(compiledCache), len(cardTypeCompiled), time.Since(start))
 	return nil
 }

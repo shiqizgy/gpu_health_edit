@@ -81,7 +81,7 @@ func main() {
 		// 评分服务:健康仓储 + 拓扑 + 策略 + 默认策略码 + vendor策略映射 + 故障检测 + 协程池
 		scorer = service.NewScorerService(
 			repository.NewHealthRepo(db), repository.NewTopologyRepo(db),
-			strategySvc, cfg.Scorer.StrategyCode, cfg.Scorer.VendorStrategy, faultDetectSvc, scorerPool,
+			strategySvc, cfg.Scorer.StrategyCode, cfg.Scorer.CardTypeStrategy, faultDetectSvc, scorerPool,
 		)
 	}
 
