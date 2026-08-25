@@ -410,11 +410,11 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]types.MetricFrame, err
 		liveKeys[mib] = struct{}{} // 记录该指标本轮存活
 	}
 
-	// 对 counter 类指标做差值处理:用上一轮缓存值算增量/速率,写回 frames
-	s.applyDelta(frames)
+	// 先把多通道指标聚合成单条，再做增量/速率换算
 	for _, f := range frames {
 		aggregateMultiLane(f)
 	}
+	s.applyDelta(frames)
 
 	// 统计每个节点(sn)上聚合到的 GPU 数量,供拓扑同步时更新节点的卡数
 	nodeGPUCount := map[string]int{}
@@ -574,7 +574,7 @@ func (s *CKLoaderService) syncTopologyBatch(metas map[string]meta, frames map[st
 	if len(gpus) > 0 {
 		if err := s.topo.DB().Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "uuid"}},
-			DoUpdates: clause.AssignmentColumns([]string{"node_id", "cluster_id", "gpu_index", "status", "vendor", "updated_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"node_id", "cluster_id", "gpu_index", "status", "vendor", "card_type", "updated_at"}),
 		}).CreateInBatches(gpus, 500).Error; err != nil {
 			logger.L.Errorf("批量 upsert gpu 失败: %v", err)
 		}

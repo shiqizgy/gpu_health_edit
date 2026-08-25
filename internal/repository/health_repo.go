@@ -137,7 +137,7 @@ func (r *HealthRepo) GlobalStats() (*GlobalStats, error) {
 func (r *HealthRepo) UpsertClusterSummary(s *model.ClusterHealthSummary) error {
 	return r.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "cluster_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"cluster_code", "cluster_name", "total_gpu", "avg_score", "healthy_cnt", "sub_healthy_cnt", "warning_cnt", "critical_cnt", "failed_cnt", "bound_strategy_id", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"cluster_code", "cluster_name", "total_gpu", "avg_score", "healthy_cnt", "sub_healthy_cnt", "warning_cnt", "critical_cnt", "failed_cnt", "bound_strategy_id", "updated_at", "unknown_cnt"}),
 	}).Create(s).Error
 }
 
@@ -165,6 +165,7 @@ func (r *HealthRepo) RecomputeClusterSummaries() error {
 		WarningCnt      int
 		CriticalCnt     int
 		FailedCnt       int
+		UnknownCnt      int
 		BoundStrategyID *uint64
 	}
 	var rows []aggRow
@@ -172,12 +173,13 @@ func (r *HealthRepo) RecomputeClusterSummaries() error {
 		Select(`s.cluster_id,
 			c.code AS cluster_code, c.name AS cluster_name,
 			COUNT(*) AS total_gpu,
-			AVG(s.score) AS avg_score,
-			SUM(CASE WHEN s.level='healthy' THEN 1 ELSE 0 END) AS healthy_cnt,
+			SUM(CASE WHEN s.level='healthy'     THEN 1 ELSE 0 END) AS healthy_cnt,
 			SUM(CASE WHEN s.level='sub_healthy' THEN 1 ELSE 0 END) AS sub_healthy_cnt,
-			SUM(CASE WHEN s.level='warning' THEN 1 ELSE 0 END) AS warning_cnt,
-			SUM(CASE WHEN s.level='critical' THEN 1 ELSE 0 END) AS critical_cnt,
-			SUM(CASE WHEN s.level='failed' THEN 1 ELSE 0 END) AS failed_cnt,
+			SUM(CASE WHEN s.level='warning'     THEN 1 ELSE 0 END) AS warning_cnt,
+			SUM(CASE WHEN s.level='critical'    THEN 1 ELSE 0 END) AS critical_cnt,
+			SUM(CASE WHEN s.level='failed'      THEN 1 ELSE 0 END) AS failed_cnt,
+			SUM(CASE WHEN s.level='unknown'     THEN 1 ELSE 0 END) AS unknown_cnt,
+			AVG(CASE WHEN s.level<>'unknown' THEN s.score END)      AS avg_score,
 			c.strategy_id AS bound_strategy_id`).
 		Joins("JOIN cluster c ON c.id = s.cluster_id").
 		Group("s.cluster_id, c.code, c.name, c.strategy_id").
@@ -205,13 +207,14 @@ func (r *HealthRepo) RecomputeClusterSummaries() error {
 			WarningCnt:      x.WarningCnt,
 			CriticalCnt:     x.CriticalCnt,
 			FailedCnt:       x.FailedCnt,
+			UnknownCnt:      x.UnknownCnt,
 			BoundStrategyID: x.BoundStrategyID,
 			UpdatedAt:       now,
 		})
 	}
 	return r.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "cluster_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"cluster_code", "cluster_name", "total_gpu", "avg_score", "healthy_cnt", "sub_healthy_cnt", "warning_cnt", "critical_cnt", "failed_cnt", "bound_strategy_id", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"cluster_code", "cluster_name", "total_gpu", "avg_score", "healthy_cnt", "sub_healthy_cnt", "warning_cnt", "critical_cnt", "failed_cnt", "bound_strategy_id", "updated_at", "unknown_cnt"}),
 	}).CreateInBatches(summaries, 100).Error
 }
 

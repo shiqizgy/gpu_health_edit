@@ -1,5 +1,5 @@
 app:
-  roles: []
+  roles: ["api", "loader", "scorer"]
 
 server:
   addr: ":8080"

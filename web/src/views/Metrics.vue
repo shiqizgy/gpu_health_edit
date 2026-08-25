@@ -19,7 +19,7 @@
     </div>
 
     <div class="panel">
-      <n-data-table :columns="columns" :data="rows" :bordered="false" :max-height="620" size="small" />
+      <n-data-table :columns="columns" :data="rows" :row-key="(r) => r.id" :bordered="false" :max-height="620" size="small" />
       <div class="pager">
         <n-pagination v-model:page="page" :page-count="pageCount" :page-size="pageSize" @update:page="load" />
       </div>
@@ -35,7 +35,7 @@
           </n-gi>
           <n-gi :span="2">
             <n-form-item label="官方编号">
-              <n-input v-model:value="form.official_num" placeholder="DCGM_FI_DEV_GPU_TEMP (150)" />
+              <n-input v-model:value="form.official_no" placeholder="DCGM_FI_DEV_GPU_TEMP (150)" />
             </n-form-item>
           </n-gi>
 
@@ -87,24 +87,24 @@
             <n-form-item label="正常下界"><n-input-number v-model:value="form.lower_bound" style="width:100%" /></n-form-item>
           </n-gi>
           <n-gi>
-            <n-form-item label="正常上界"><n-input-number v-model:value="form.upper_bond" style="width:100%" /></n-form-item>
+            <n-form-item label="正常上界"><n-input-number v-model:value="form.upper_bound" style="width:100%" /></n-form-item>
           </n-gi>
           <n-gi>
-            <n-form-item label="告警下界"><n-input-number v-model:value="form.warn_lowbound" style="width:100%" /></n-form-item>
+            <n-form-item label="告警下界"><n-input-number v-model:value="form.alert_lower" style="width:100%" /></n-form-item>
           </n-gi>
 
           <n-gi>
-            <n-form-item label="告警上界"><n-input-number v-model:value="form.warn_upbound" style="width:100%" /></n-form-item>
+            <n-form-item label="告警上界"><n-input-number v-model:value="form.alert_upper" style="width:100%" /></n-form-item>
           </n-gi>
           <n-gi>
             <n-form-item label="正常速率"><n-input-number v-model:value="form.normal_rate" style="width:100%" /></n-form-item>
           </n-gi>
           <n-gi>
-            <n-form-item label="告警速率"><n-input-number v-model:value="form.warn_rate" style="width:100%" /></n-form-item>
+            <n-form-item label="告警速率"><n-input-number v-model:value="form.alert_rate" style="width:100%" /></n-form-item>
           </n-gi>
 
           <n-gi>
-            <n-form-item label="速率单位"><n-input v-model:value="form.normal_rate_unit" placeholder="次/天、μs/s" /></n-form-item>
+            <n-form-item label="速率单位"><n-input v-model:value="form.rate_unit" placeholder="次/天、μs/s" /></n-form-item>
           </n-gi>
           <n-gi>
             <n-form-item label="布尔正常"><n-input v-model:value="form.bool_normal" placeholder="0 / OK" /></n-form-item>
@@ -239,17 +239,14 @@ const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 function emptyForm() {
   const isNpu = pageCardType.value === "NPU";
   return {
-    id: 0, seq_no: null, metric_name: "", official_num: "",
+    id: 0, seq_no: null, metric_name: "", official_no: "",
     card_type: isNpu ? "NPU" : "GPU",
     dimension: isNpu ? "reliability昇腾可靠性与运行状态" : "compute算力性能",
     value_type: 1, owner_subject: 1, health_purpose: 1,
     unit: "", work_range: "",
-    lower_bound: null, upper_bond: null, warn_lowbound: null, warn_upbound: null,
-    normal_rate: null, warn_rate: null, normal_rate_unit: "",
-    bool_normal: "", bool_abnormal: "", enum_result: "",enum_score: "",
-    concept: "", is_veto: 0, derate_threshold: "", source_ref: "",
-    vendor: isNpu ? "华为昇腾" : "NVIDIA",
-    remark: "", is_health_key: true,
+    lower_bound: null, upper_bound: null, alert_lower: null, alert_upper: null,
+    normal_rate: null, alert_rate: null, rate_unit: "",
+    bool_normal: "", bool_abnormal: "", enum_result: "", enum_score: "",
   };
 }
 
@@ -264,7 +261,7 @@ const columns = [
   { title: "序号", key: "seq_no", width: 60 },
   { title: "指标名称", key: "metric_name", width: 280, ellipsis: { tooltip: true },
     render: (r: any) => h("span", { class: "mono", style: "font-size:12px;color:#9aa7b4" }, r.metric_name) },
-  { title: "官方编号", key: "official_num", width: 170, ellipsis: { tooltip: true } },
+  { title: "官方编号", key: "official_no", width: 170, ellipsis: { tooltip: true } },
   { title: "卡类型", key: "card_type", width: 70 },
   { title: "厂商", key: "vendor", width: 90 },
   { title: "维度", key: "dimension", width: 110,
@@ -277,11 +274,11 @@ const columns = [
     render: (r: any) => purposeLabels[r.health_purpose] || r.health_purpose },
   { title: "单位", key: "unit", width: 70 },
   { title: "工作范围", key: "work_range", width: 110, ellipsis: { tooltip: true } },
-  { title: "正常区间", key: "_normal", width: 110,render: (r: any) => fmtRange(r.lower_bound, r.upper_bond) },
-  { title: "告警区间", key: "_warn", width: 110,render: (r: any) => fmtRange(r.warn_lowbound, r.warn_upbound) },
+  { title: "正常区间", key: "_normal", width: 110,render: (r: any) => fmtRange(r.lower_bound, r.upper_bound) },
+  { title: "告警区间", key: "_warn", width: 110,render: (r: any) => fmtRange(r.alert_lower, r.alert_upper) },
   { title: "速率(正常/告警)", key: "_rate", width: 130,render: (r: any) => {
-  if (r.normal_rate == null && r.warn_rate == null) return "—";
-  return `${r.normal_rate ?? "—"} / ${r.warn_rate ?? "—"} ${r.normal_rate_unit || ""}`;
+  if (r.normal_rate == null && r.alert_rate == null) return "—";
+  return `${r.normal_rate ?? "—"} / ${r.alert_rate ?? "—"} ${r.rate_unit || ""}`;
       } },
   { title: "布尔(正常/异常)", key: "_bool", width: 120,render: (r: any) => (r.bool_normal || r.bool_abnormal)
         ? `${r.bool_normal || "—"} / ${r.bool_abnormal || "—"}` : "—" },
@@ -330,9 +327,9 @@ function openCreate() { editing.value = false; form.value = emptyForm(); showMod
 function openEdit(r: any) {
   editing.value = true;
   form.value = { ...emptyForm(), ...r,
-    lower_bound: r.lower_bound ?? null, upper_bond: r.upper_bond ?? null,
-    warn_lowbound: r.warn_lowbound ?? null, warn_upbound: r.warn_upbound ?? null,
-    normal_rate: r.normal_rate ?? null, warn_rate: r.warn_rate ?? null };
+    lower_bound: r.lower_bound ?? null, upper_bound: r.upper_bound ?? null,
+    alert_lower: r.alert_lower ?? null, alert_upper: r.alert_upper ?? null,
+    normal_rate: r.normal_rate ?? null, alert_rate: r.alert_rate ?? null };
   showModal.value = true;
 }
 async function save() {

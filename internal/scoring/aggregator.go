@@ -90,7 +90,8 @@ func Score(metrics map[string]float64, strategy *CompiledStrategy) Result {
 	result.Veto = veto.hit
 	result.VetoReason = veto.reason
 	// 覆盖率不足：标记为 unknown，不给虚高分数
-	if result.Coverage < MinCoverage && !veto.hit {
+	// 零覆盖 = 采集/策略链路有问题，不是卡的健康问题，不能判 failed
+	if result.Coverage <= MinCoverage && !veto.hit {
 		result.Level = "unknown"
 		return result
 	}

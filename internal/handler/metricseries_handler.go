@@ -96,7 +96,9 @@ func (h *MetricSeriesHandler) GPUMetrics(c *gin.Context) {
 	bucket := pickBucket(from, to, maxPoints)
 
 	// 4) 指标元数据（类型/维度/单位）来自 metric_definition，单一真相源
-	defs, _, err := h.metric.List(repository.MetricQuery{})
+	// 用全量 AllDefsMap（勿用带默认分页的 List，否则 meta 只有前 20 条，
+	// 导致大部分参评指标在下方 meta[m] 查不到而被跳过，明细图缺失）
+	defsMap, err := h.metric.AllDefsMap()
 	if err != nil {
 		response.ServerError(c, err.Error())
 		return
@@ -105,8 +107,8 @@ func (h *MetricSeriesHandler) GPUMetrics(c *gin.Context) {
 		disp, dim, unit string
 		typ             int
 	}{}
-	for _, d := range defs {
-		meta[d.MetricName] = struct {
+	for key, d := range defsMap {
+		meta[key] = struct {
 			disp, dim, unit string
 			typ             int
 		}{disp: d.Conception, dim: d.Dimension, unit: d.Unit, typ: d.ValueType}

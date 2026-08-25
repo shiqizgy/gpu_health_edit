@@ -48,6 +48,7 @@ type ClusterHealthSummary struct {
 	FailedCnt       int       `json:"failed_cnt"`
 	BoundStrategyID *uint64   `gorm:"index" json:"bound_strategy_id"` // 当前评分策略ID
 	UpdatedAt       time.Time `json:"updated_at"`
+	UnknownCnt      int       `json:"unknown_cnt"`
 }
 
 func (ClusterHealthSummary) TableName() string { return "cluster_health_summary" }

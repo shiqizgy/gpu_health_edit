@@ -119,7 +119,8 @@ func (s *ScorerService) RunOnceWith(ctx context.Context, frames []types.MetricFr
 			f := frames[i]
 			compiled := defaultStrategy
 			clusterID := uint64(0)
-			if b, known := bindOf[f.UUID]; known {
+			b, known := bindOf[f.UUID]
+			if known {
 				clusterID = b.clusterID
 				if b.strategyID != nil {
 					if cs, ok := compiledCache[*b.strategyID]; ok {
@@ -131,6 +132,15 @@ func (s *ScorerService) RunOnceWith(ctx context.Context, frames []types.MetricFr
 			}
 
 			result := scoring.Score(f.Metrics, compiled)
+
+			if result.Coverage == 0 {
+				if known {
+					logger.L.Warnf("卡 %s (card_type=%s, strategy=%d) 零覆盖，策略与卡型可能不匹配或指标名对不上", f.UUID, b.cardType, compiled.StrategyID)
+				} else {
+					logger.L.Warnf("卡 %s 零覆盖且未在拓扑中找到绑定，走默认策略(strategy=%d)", f.UUID, compiled.StrategyID)
+				}
+			}
+
 			entries[i] = scoring.CardScore{Metrics: f.Metrics, Result: result}
 
 			snap := model.GPUHealthSnapshot{
