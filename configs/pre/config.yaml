@@ -1,5 +1,5 @@
 app:
-  roles: []
+  roles: ["api", "loader", "scorer"]
 
 server:
   addr: ":8080"
@@ -7,17 +7,22 @@ server:
 
 mysql:
   # podman 部署时，容器名即主机名；本地直连用 127.0.0.1
-  dsn: "db_write:ys5aG6aYQ1@tcp(write-mysql.test.smartops.jd.local:3358)/gpu_health?charset=utf8&parseTime=True&loc=Local&timeout=1000ms"
+  dsn: "db_write:ys5aG6aYQ1@tcp(write-mysql.test.smartops.jd.local:3358)/gpu_health?charset=utf8&parseTime=True&loc=Local&timeout=1000ms&multiStatements=true"
   max_open: 50
   max_idle: 10
-  auto_migrate: false
+  auto_migrate: true
+
+seed:
+  enabled: true        # 首次部署开 true，成功后改回 false
+  reset: true          # 启动时先清空业务表
+  drop_tables: []      # 预发库中旧版遗留的表名填这里，如 ["metric_definition", "accel_metrics"]
 
 scorer:
-  cron: "@every 1m"
-  strategy_code: "default"
-  vendor_strategy:
-    nvidia: "default"
-    huawei: "default-npu"
+  cron: "@every 1m"          # 每分钟评分一次
+  strategy_code: "DCGM_default"
+  card_type_strategy:
+    GPU: "DCGM_default"
+    NPU: "npu_default"
   workers: 0
 
 assistant:
@@ -33,7 +38,7 @@ ck:
   window_sec: 300
   metric_ttl: 300
   source: "jiushu"       # 只采集 jiushu 集群
-  gpu_limit: 64          # 随机抽样 64 张卡
+  gpu_limit: 2000          # 随机抽样 2000 张卡
 
 retention:
   enabled: true

@@ -2,4 +2,5 @@ FROM docker.io/library/alpine:3.20
 WORKDIR /app
 COPY app /app/app
 COPY configs /app/configs
-ENTRYPOINT ["/app/app", "-config", "/app/configs/pre/config.yaml"]
+ENV APP_ENV=pre
+ENTRYPOINT ["/app/app"]

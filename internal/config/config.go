@@ -17,6 +17,13 @@ type Config struct {
 	Assistant AssistantConfig  `yaml:"assistant"`
 	CK        CKConfig         `yaml:"ck"`
 	Retention RententionConfig `yaml:"retention"` //数据保留时间配置
+	Seed      SeedConfig       `yaml:"seed"`      // 新增,灌入种子数据需要
+}
+
+type SeedConfig struct {
+	Enabled    bool     `yaml:"enabled"`     // 是否启动时灌入种子数据
+	Reset      bool     `yaml:"reset"`       // 灌入前清空业务表数据
+	DropTables []string `yaml:"drop_tables"` // 旧版遗留表名，启动时直接 DROP
 }
 
 type ServerConfig struct {

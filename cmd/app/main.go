@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,6 +16,7 @@ import (
 	"github.com/gpu-health/platform/internal/config"
 	"github.com/gpu-health/platform/internal/repository"
 	"github.com/gpu-health/platform/internal/router"
+	"github.com/gpu-health/platform/internal/seed"
 	"github.com/gpu-health/platform/internal/service"
 	"github.com/gpu-health/platform/pkg/logger"
 	"github.com/gpu-health/platform/pkg/pool"
@@ -23,8 +25,17 @@ import (
 
 func main() {
 	// 从命令行读取配置文件路径,默认 configs/local/config.yaml
-	cfgPath := flag.String("config", "configs/local/config.yaml", "配置文件路径")
+	cfgPath := flag.String("config", "", "配置文件路径（留空则按APP_ENV自动选择）")
 	flag.Parse()
+
+	if *cfgPath == "" {
+		if env := os.Getenv("APP_ENV"); env != "" {
+			*cfgPath = "configs/" + env + "/config.yaml"
+		} else {
+			*cfgPath = "configs/local/config.yaml"
+		}
+	}
+	fmt.Printf("使用配置文件: %s\n", *cfgPath)
 
 	//加载配置,失败直接 panic(启动阶段致命错误)
 	cfg, err := config.Load(*cfgPath)
@@ -40,11 +51,37 @@ func main() {
 		gin.SetMode(gin.ReleaseMode) // 生产模式关闭 gin 的调试输出
 	}
 
-	// 连接 MySQL(业务数据库),AutoMigrate 控制是否自动建表
-	db, err := repository.NewDB(cfg.MySQL, cfg.MySQL.AutoMigrate)
+	// 第一步：先连库（不建表），若开启 seed.reset 则删除全部旧表，
+	// 避免旧表结构与新模型冲突导致 AutoMigrate 失败
+	db, err := repository.NewDB(cfg.MySQL, false)
 	if err != nil {
 		logger.L.Fatalf("连接 MySQL 失败: %v", err)
 	}
+	if cfg.Seed.Enabled && cfg.Seed.Reset {
+		if err := seed.Reset(db, cfg.Seed); err != nil {
+			logger.L.Fatalf("清理旧表失败: %v", err)
+		}
+		if sqlDB, err := db.DB(); err == nil {
+			sqlDB.Close()
+		}
+		db = nil
+	}
+
+	// 第二步：重新连接并建表（此时库是干净的，AutoMigrate 全新建表）
+	if db == nil {
+		db, err = repository.NewDB(cfg.MySQL, cfg.MySQL.AutoMigrate)
+		if err != nil {
+			logger.L.Fatalf("连接/建表失败: %v", err)
+		}
+	}
+
+	// 第三步：灌入种子数据（表已建好）
+	if cfg.Seed.Enabled {
+		if err := seed.Run(db, cfg.Seed); err != nil {
+			logger.L.Fatalf("灌入种子数据失败: %v", err)
+		}
+	}
+
 	// 连接 ClickHouse(指标时序数据源)
 	ck, err := ckclient.New(cfg.CK)
 	if err != nil {
