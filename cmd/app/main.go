@@ -51,13 +51,19 @@ func main() {
 		gin.SetMode(gin.ReleaseMode) // 生产模式关闭 gin 的调试输出
 	}
 
-	// 第一步：先连库（不建表），若开启 seed.reset 则删除全部旧表，
-	// 避免旧表结构与新模型冲突导致 AutoMigrate 失败
-	db, err := repository.NewDB(cfg.MySQL, false)
+	// 第一步：先连库（不建表），判断是否真的需要初始化
+	firstCfg := cfg.MySQL
+	firstCfg.AutoMigrate = false
+	db, err := repository.NewDB(firstCfg, false)
 	if err != nil {
 		logger.L.Fatalf("连接 MySQL 失败: %v", err)
 	}
-	if cfg.Seed.Enabled && cfg.Seed.Reset {
+
+	// ★ 幂等保护：只有首次部署(核心表不存在/无策略数据)才走 reset+seed，
+	//   正常 Pod 重启不再清库，避免页面 no data
+	needInit := cfg.Seed.Enabled && seed.NeedInit(db)
+
+	if needInit && cfg.Seed.Reset {
 		if err := seed.Reset(db, cfg.Seed); err != nil {
 			logger.L.Fatalf("清理旧表失败: %v", err)
 		}
@@ -67,19 +73,28 @@ func main() {
 		db = nil
 	}
 
-	// 第二步：重新连接并建表（此时库是干净的，AutoMigrate 全新建表）
+	// 第二步：重连并按 cfg.AutoMigrate 建表
 	if db == nil {
-		db, err = repository.NewDB(cfg.MySQL, cfg.MySQL.AutoMigrate)
+		db, err = repository.NewDB(cfg.MySQL, false)
 		if err != nil {
 			logger.L.Fatalf("连接/建表失败: %v", err)
 		}
+	} else if cfg.MySQL.AutoMigrate {
+		// 未清库但需保证表结构最新：单独触发一次 AutoMigrate
+		db2, err := repository.NewDB(cfg.MySQL, false)
+		if err != nil {
+			logger.L.Fatalf("AutoMigrate 失败: %v", err)
+		}
+		db = db2
 	}
 
-	// 第三步：灌入种子数据（表已建好）
-	if cfg.Seed.Enabled {
+	// 第三步：灌入种子数据（仅首次）
+	if needInit {
 		if err := seed.Run(db, cfg.Seed); err != nil {
 			logger.L.Fatalf("灌入种子数据失败: %v", err)
 		}
+	} else {
+		logger.L.Info("检测到已有策略数据，跳过 seed（正常重启不清库）")
 	}
 
 	// 连接 ClickHouse(指标时序数据源)

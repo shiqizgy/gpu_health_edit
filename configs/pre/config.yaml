@@ -13,8 +13,8 @@ mysql:
   auto_migrate: true
 
 seed:
-  enabled: true        # 首次部署开 true，成功后改回 false
-  reset: true          # 启动时先清空业务表
+  enabled: false        # 首次部署开 true，成功后改回 false
+  reset: false          # 启动时先清空业务表
   drop_tables: []      # 预发库中旧版遗留的表名填这里，如 ["metric_definition", "accel_metrics"]
 
 scorer:

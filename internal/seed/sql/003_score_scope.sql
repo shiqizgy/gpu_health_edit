@@ -4,7 +4,7 @@
 -- 幂等，可重复执行
 -- ============================================================
 SET NAMES utf8mb4;
-USE gpu_health;
+
 
 -- ---------- 1. 参与评分范围：核心用途 + 归属于本卡/链路/共享设施 ----------
 UPDATE accel_metric_scoring SET is_health_key = 0;
@@ -46,8 +46,7 @@ WHERE metric_name IN ('npu_chip_info_link_status',
                       'npu_chip_info_network_status',
                       'npu_chip_roce_rx_err_pkt_num',
                       'npu_chip_optical_state');
-第 5 节的枚举规则追加三条（enum_result 里语义已写明，1=正常）：
-sql
+-- 第 5 节的枚举规则追加三条（enum_result 里语义已写明，1=正常）：
 -- ⑧ 昇腾 RoCE 链路 / 网络状态 / 光模块在位：1 = 正常，0 = 异常
 UPDATE accel_metric_scoring SET enum_score =
   '{"mode":"enum","default":20,"map":{"1":100,"0":20}}'

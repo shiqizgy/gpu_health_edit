@@ -1,17 +1,4 @@
 SET NAMES utf8mb4;
-USE gpu_health;
-
-DROP TABLE IF EXISTS `strategy_metric_rule`;
-CREATE TABLE `strategy_metric_rule` (
-  `id`             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `strategy_id`    BIGINT UNSIGNED NOT NULL,
-  `metric_key`     VARCHAR(191)    NOT NULL COMMENT '对应 accel_metric_scoring.metric_name',
-  `weight`         DECIMAL(6,3)    NOT NULL DEFAULT 1.000 COMMENT '维度内权重，暂统一 1.0',
-  `is_veto`        TINYINT(1)      NOT NULL DEFAULT 0,
-  `veto_threshold` DOUBLE          NOT NULL DEFAULT 0 COMMENT '>0 按此阈值否决；<=0 按落入故障档否决',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `idx_strategy_metric` (`strategy_id`,`metric_key`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 DELETE FROM `scoring_strategy` WHERE code IN ('DCGM_default','npu_default');
 

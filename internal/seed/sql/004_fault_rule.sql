@@ -1,5 +1,5 @@
 SET NAMES utf8mb4;
-USE gpu_health;
+
 DELETE FROM fault_rule;
 INSERT INTO fault_rule
   (name, trigger_type, metric_key, operator, threshold, severity, enabled, created_at, updated_at)

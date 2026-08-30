@@ -27,7 +27,7 @@ func (c *Client) QuerySeries(ctx context.Context, table, sn, tags, mib string,
 SELECT toStartOfInterval(timestamp, INTERVAL %d SECOND) AS ts, %s(value) AS v
 FROM %s
 WHERE sn = ? AND tags = ? AND mib = ?
-    AND dt BETWEEN toDate(?) AND toDate(?) AND timestamp BETWEEN ? AND ?
+    AND toDate(dt) BETWEEN toDate(?) AND toDate(?) AND timestamp BETWEEN ? AND ?
 GROUP BY ts ORDER BY ts`, bucketSec, agg, table)
 
 	rows, err := c.db.QueryContext(ctx, q, sn, tags, mib, from, to, from, to)
@@ -55,7 +55,7 @@ func (c *Client) QueryEvents(ctx context.Context, table, sn, tags, mib string,
 SELECT timestamp AS ts, value AS v
 FROM %s
 WHERE sn = ? AND tags = ? AND mib = ? AND value > 0
-    AND dt BETWEEN toDate(?) AND toDate(?) AND timestamp BETWEEN ? AND ?
+    AND toDate(dt) BETWEEN toDate(?) AND toDate(?) AND timestamp BETWEEN ? AND ?
 ORDER BY ts`, table)
 
 	rows, err := c.db.QueryContext(ctx, q, sn, tags, mib, from, to, from, to)
