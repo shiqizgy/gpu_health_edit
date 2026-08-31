@@ -87,7 +87,13 @@ func NewCKLoaderService(
 	}
 }
 
-func gpuUUID(sn, tags string) string { return sn + ":" + tags }
+func gpuUUID(sn, tags string) string {
+	sn, tags = strings.TrimSpace(sn), strings.TrimSpace(tags)
+	if sn == "" || tags == "" {
+		return ""
+	}
+	return sn + ":" + tags
+}
 
 func normalizeMIB(mib string) string { return mib }
 
@@ -390,8 +396,16 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]types.MetricFrame, err
 	liveKeys := map[string]struct{}{}
 	now := time.Now().Unix() //统一时间戳,保证同一轮所有帧 TS 一致
 
+	skipped := 0
 	// 遍历所有扁平行(每行 = 某张卡的某个指标的最新值),按卡聚合
 	for _, r := range allRows { //遍历每一条扁平行数据
+		//tag为卡序号，为空说明世界点指标或上游漏打标签
+		// 拼成的 uuid 会把整个节点的行合并成一张"幽灵卡"，必须丢弃，
+		//todo 后续调整：用卡的uuid来指代
+		if strings.TrimSpace(r.Tags) == "" {
+			skipped++
+			continue
+		}
 		uuid := gpuUUID(r.SN, r.Tags) //SN:Tags 拼出GPU卡的唯一标识
 
 		// 该卡的帧第一次出现时初始化,并记录其元信息
@@ -409,7 +423,9 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]types.MetricFrame, err
 		f.Metrics[mib] = val       // 把指标写入该卡这一帧
 		liveKeys[mib] = struct{}{} // 记录该指标本轮存活
 	}
-
+	if skipped > 0 {
+		logger.L.Warnf("本轮丢弃 %d 行 tag 为空的数据（无法定位到具体卡）", skipped)
+	}
 	// 先把多通道指标聚合成单条，再做增量/速率换算
 	for _, f := range frames {
 		aggregateMultiLane(f)
@@ -559,7 +575,13 @@ func (s *CKLoaderService) syncTopologyBatch(metas map[string]meta, frames map[st
 		if !ok {
 			continue
 		}
-		idx, _ := strconv.Atoi(m.tags)
+		idx, err := strconv.Atoi(m.tags)
+
+		if err != nil {
+			logger.L.Warnf("卡 %s 的 tags=%q 不是合法卡序号，跳过入库", uuid, m.tags)
+			continue
+		}
+
 		vendor, cardType := detectDevice(frames[uuid].Metrics)
 		if cardType == "" {
 			logger.L.Warnf("卡 %s 无法识别设备类型（指标数=%d），本轮跳过评分",
@@ -593,6 +615,7 @@ func (s *CKLoaderService) syncMetricHealthKey(liveKeys map[string]struct{}) {
 	}
 
 	var enableKeys []string
+
 	for k := range liveKeys {
 		if _, ok := definedSet[k]; ok {
 			enableKeys = append(enableKeys, k)
@@ -613,14 +636,14 @@ func (s *CKLoaderService) syncMetricHealthKey(liveKeys map[string]struct{}) {
 		}
 	}
 
-	if n, err := s.metricRepo.UpdateHealthKeyByMetricKeys(enableKeys, true); err != nil {
+	if n, err := s.metricRepo.UpdateAliveByMetricKeys(enableKeys, true); err != nil {
 		logger.L.Warnf("启用指标评分失败: %v", err)
 	} else if n > 0 {
 		logger.L.Infof("启用 %d 个指标参与评分: %v", n, enableKeys)
 		//s.bumpStrategiesByKeys(enableKeys)
 	}
 
-	if n, err := s.metricRepo.UpdateHealthKeyByMetricKeys(disableKeys, false); err != nil {
+	if n, err := s.metricRepo.UpdateAliveByMetricKeys(disableKeys, false); err != nil {
 		logger.L.Warnf("关闭指标评分失败: %v", err)
 	} else if n > 0 {
 		logger.L.Infof("关闭 %d 个指标参与评分(连续 %d 轮未出现): %v",

@@ -94,6 +94,7 @@ type MetricDefinition struct {
 	//ScoreScope  int       `gorm:"type:tinyint;index;default:0" json:"score_scope"` // 评分范围控制
 	Remark      string    `gorm:"type:varchar(255)" json:"remark"`   //备注
 	IsHealthKey bool      `gorm:"default:true" json:"is_health_key"` //是否参与健康值评分
+	IsAlive     bool      `gorm:"default:true" json:"is_alive"`      //指标是否有数据 todo 0是 ；1是
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

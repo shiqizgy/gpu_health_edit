@@ -160,3 +160,14 @@ func (r *MetricRepo) AllDefsMap() (map[string]model.MetricDefinition, error) {
 }
 
 func (r *MetricRepo) DB() *gorm.DB { return r.db }
+
+// 更新 is_alive 字段
+func (r *MetricRepo) UpdateAliveByMetricKeys(keys []string, alive bool) (int64, error) {
+	if len(keys) == 0 {
+		return 0, nil
+	}
+	res := r.db.Model(&model.MetricDefinition{}).
+		Where("metric_name IN ? AND is_alive <> ?", keys, alive).
+		Update("is_alive", alive)
+	return res.RowsAffected, res.Error
+}
