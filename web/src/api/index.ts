@@ -130,6 +130,22 @@ export const api = {
   faultPool: (params?: any) => http.get<any, any>("/faults/pool", { params }),
   faultPoolStats: () => http.get<any, any>("/faults/pool/stats"),
   resolveFault: (id: number) => http.put<any, any>(`/faults/pool/${id}/resolve`),
+
+  // ── 故障知识图谱 ──
+  kgMeta: () => http.get<any, any>("/kg/meta"),
+  kgGraph: (params?: any) => http.get<any, any>("/kg/graph", { params }),
+  kgNeighbors: (id: number, params?: any) =>
+      http.get<any, any>(`/kg/nodes/${id}/neighbors`, { params }),
+  kgNodes: (params?: any) => http.get<any, any>("/kg/nodes", { params }),
+  kgNodeDetail: (id: number) => http.get<any, any>(`/kg/nodes/${id}`),
+  kgCreateNode: (data: any) => http.post<any, any>("/kg/nodes", data),
+  kgUpdateNode: (id: number, data: any) => http.put<any, any>(`/kg/nodes/${id}`, data),
+  kgDeleteNode: (id: number) => http.delete<any, any>(`/kg/nodes/${id}`),
+  kgCreateEdge: (data: any) => http.post<any, any>("/kg/edges", data),
+  kgUpdateEdge: (id: number, data: any) => http.put<any, any>(`/kg/edges/${id}`, data),
+  kgDeleteEdge: (id: number) => http.delete<any, any>(`/kg/edges/${id}`),
+  kgMetricOptions: (params?: any) => http.get<any, any>("/kg/metric-options", { params }),
+  kgImportFaultKnowledge: () => http.post<any, any>("/kg/import/fault-knowledge"),
   
   //AI助手会话
   listConversations: () => http.get<any, any>("/assistant/conversations"),

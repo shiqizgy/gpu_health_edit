@@ -61,5 +61,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&model.FaultEvent{},
 		&model.AIConversation{},
 		&model.AIMessage{},
+		&model.KGNode{}, // 知识图谱节点
+		&model.KGEdge{}, // 知识图谱边
 	)
 }

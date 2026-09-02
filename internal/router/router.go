@@ -35,6 +35,7 @@ func Setup(db *gorm.DB, assistantCfg config.AssistantConfig, ck *ckclient.Client
 	faultRepo := repository.NewFaultRepo(db)
 	faultEventRepo := repository.NewFaultEventRepo(db)
 	assistantRepo := repository.NewAssistantRepo(db)
+	kgRepo := repository.NewKGRepo(db)
 
 	//实例化 service：把 AI 服务所需的所有依赖一次性注入，生成一个能真正处理业务逻辑的assistantSvc实例
 	assistantSvc := assistant.NewService(assistantCfg, topoRepo, healthRepo, metricRepo, faultRepo, ck, table, assistantRepo)
@@ -52,6 +53,8 @@ func Setup(db *gorm.DB, assistantCfg config.AssistantConfig, ck *ckclient.Client
 	assistantH := handler.NewAssistantHandler(assistantSvc, assistantRepo)
 	strategySvc := service.NewStrategyService(strategyRepo, metricRepo)
 	metricSeriesH := handler.NewMetricSeriesHandler(ck, table, topoRepo, metricRepo, healthRepo, strategySvc)
+	kgSvc := service.NewKGService(kgRepo, metricRepo, faultRepo)
+	kgH := handler.NewKGHandler(kgSvc)
 
 	api := r.Group("/api/v1")
 	{
@@ -110,6 +113,24 @@ func Setup(db *gorm.DB, assistantCfg config.AssistantConfig, ck *ckclient.Client
 
 		// 新增：单卡时序曲线
 		api.GET("/health/gpus/:uuid/metrics", metricSeriesH.GPUMetrics)
+
+		// ── 故障知识图谱（与评分链路无关，纯知识管理）──
+		api.GET("/kg/meta", kgH.Meta)
+		api.GET("/kg/graph", kgH.Graph)
+		api.GET("/kg/metric-options", kgH.MetricOptions)
+
+		api.GET("/kg/nodes", kgH.ListNodes)
+		api.POST("/kg/nodes", kgH.CreateNode)
+		api.GET("/kg/nodes/:id", kgH.NodeDetail)
+		api.PUT("/kg/nodes/:id", kgH.UpdateNode)
+		api.DELETE("/kg/nodes/:id", kgH.DeleteNode)
+		api.GET("/kg/nodes/:id/neighbors", kgH.Neighbors)
+
+		api.POST("/kg/edges", kgH.CreateEdge)
+		api.PUT("/kg/edges/:id", kgH.UpdateEdge)
+		api.DELETE("/kg/edges/:id", kgH.DeleteEdge)
+
+		api.POST("/kg/import/fault-knowledge", kgH.ImportFaultKnowledge)
 	}
 
 	return r
