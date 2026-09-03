@@ -118,6 +118,7 @@ func Setup(db *gorm.DB, assistantCfg config.AssistantConfig, ck *ckclient.Client
 		api.GET("/kg/meta", kgH.Meta)
 		api.GET("/kg/graph", kgH.Graph)
 		api.GET("/kg/metric-options", kgH.MetricOptions)
+		api.PUT("/kg/layout", kgH.SavePositions)
 
 		api.GET("/kg/nodes", kgH.ListNodes)
 		api.POST("/kg/nodes", kgH.CreateNode)

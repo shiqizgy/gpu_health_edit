@@ -146,6 +146,7 @@ export const api = {
   kgDeleteEdge: (id: number) => http.delete<any, any>(`/kg/edges/${id}`),
   kgMetricOptions: (params?: any) => http.get<any, any>("/kg/metric-options", { params }),
   kgImportFaultKnowledge: () => http.post<any, any>("/kg/import/fault-knowledge"),
+  kgSaveLayout: (positions: any[]) => http.put<any, any>("/kg/layout", { positions }),
   
   //AI助手会话
   listConversations: () => http.get<any, any>("/assistant/conversations"),

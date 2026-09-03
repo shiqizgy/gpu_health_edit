@@ -157,19 +157,26 @@ type KGNode struct {
 	NodeType string `gorm:"type:varchar(32);index;not null"         json:"node_type"`
 	Name     string `gorm:"type:varchar(191);index;not null"        json:"name"`
 
-	Summary     string `gorm:"type:varchar(512)" json:"summary"`     // 一句话摘要，图上 tooltip 用
-	Description string `gorm:"type:text"         json:"description"` // 详细说明
+	Summary     string `gorm:"type:varchar(512);not null;default:''"      json:"summary"`
+	Description string `gorm:"type:text;not null"                         json:"description"`
 
 	// Severity 仅对 fault 类型有意义：warning / critical / fatal。
 	// 提成独立列而不是塞进 props，是因为前端要按它决定节点配色和大小，
 	// 每次渲染都解析 JSON 不划算。
-	Severity string `gorm:"type:varchar(16);index" json:"severity"`
+	Severity string `gorm:"type:varchar(16);index;not null;default:''" json:"severity"`
 
 	// Props 扩展属性 JSON。约定用法：
 	//   metric 节点：{"metric_name":"DCGM_FI_DEV_GPU_TEMP","card_type":"GPU"}
 	//   fault  节点：{"xid_code":"48","vendor":"NVIDIA"}
 	// 写入前由服务层校验必须是合法 JSON 对象。
-	Props string `gorm:"type:json" json:"props"`
+	Props string `gorm:"type:json;not null"                         json:"props"`
+
+	// PosX / PosY 画布坐标。
+	// 用指针类型是为了区分「从未摆放过」(nil) 和「摆在原点」(0)：
+	// 前者需要前端跑力导向布局算一个位置，后者要原样还原。
+	// 坐标是纯展示属性，不参与任何业务校验，也不走乐观锁。
+	PosX *float64 `gorm:"type:double" json:"pos_x"`
+	PosY *float64 `gorm:"type:double" json:"pos_y"`
 
 	// Version 乐观锁版本号。多人同时编辑同一节点时，后提交的一方会收到 409，
 	// 而不是静默覆盖前一个人的修改。

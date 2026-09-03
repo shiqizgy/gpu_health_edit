@@ -282,3 +282,27 @@ func IsDuplicate(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "Duplicate entry") || strings.Contains(msg, "1062")
 }
+
+// SavePositions 批量保存节点画布坐标。
+//
+// 坐标是纯展示属性，刻意不走乐观锁：两个人同时拖同一个节点，
+// 后写入的生效即可，为这种场景报 409 冲突毫无意义，只会打断操作。
+// 同理也不更新 updated_at ——拖动不算内容变更。
+func (r *KGRepo) SavePositions(pos map[uint64][2]float64) error {
+	if len(pos) == 0 {
+		return nil
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		for id, p := range pos {
+			if err := tx.Model(&model.KGNode{}).
+				Where("id = ?", id).
+				UpdateColumns(map[string]any{ // UpdateColumns 跳过 updated_at 自动更新
+					"pos_x": p[0],
+					"pos_y": p[1],
+				}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}

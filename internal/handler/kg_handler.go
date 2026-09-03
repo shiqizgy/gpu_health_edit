@@ -257,3 +257,20 @@ func (h *KGHandler) ImportFaultKnowledge(c *gin.Context) {
 	}
 	response.OK(c, res)
 }
+
+// SavePositions PUT /kg/layout —— 批量保存节点在画布上的坐标。
+func (h *KGHandler) SavePositions(c *gin.Context) {
+	var req struct {
+		Positions []service.PositionInput `json:"positions"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "请求体不是合法 JSON："+err.Error())
+		return
+	}
+	n, err := h.svc.SavePositions(req.Positions)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	response.OK(c, gin.H{"saved": n})
+}

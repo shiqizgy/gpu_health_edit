@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -95,6 +96,13 @@ type MetricRefDTO struct {
 	Exists     bool   `json:"exists"`
 	Dimension  string `json:"dimension,omitempty"`
 	CardType   string `json:"card_type,omitempty"`
+}
+
+// PositionInput 单个节点的画布坐标。
+type PositionInput struct {
+	ID uint64  `json:"id"`
+	X  float64 `json:"x"`
+	Y  float64 `json:"y"`
 }
 
 // ---------------------------------------------------------------------------
@@ -889,4 +897,39 @@ func relLabel(t string) string {
 		}
 	}
 	return t
+}
+
+// SavePositions 批量保存画布坐标，返回实际保存条数。
+//
+// 只做两件事：过滤非法 ID、限制单次载荷规模。
+// 不校验节点是否存在——坐标写到一个已被删除的节点上不会有任何副作用，
+// 为此多查一次数据库不划算。
+func (s *KGService) SavePositions(list []PositionInput) (int, error) {
+	if len(list) == 0 {
+		return 0, nil
+	}
+	if len(list) > MaxGraphNodes {
+		return 0, fmt.Errorf("%w: 单次最多保存 %d 个节点的坐标，当前 %d 个",
+			ErrKGValidation, MaxGraphNodes, len(list))
+	}
+
+	pos := make(map[uint64][2]float64, len(list))
+	for _, p := range list {
+		if p.ID == 0 {
+			continue
+		}
+		// 防御 NaN / Inf：JSON 里不该出现，但前端计算异常时可能传进来，
+		// 写进 DOUBLE 列会导致后续读取时布局整个崩掉
+		if math.IsNaN(p.X) || math.IsNaN(p.Y) || math.IsInf(p.X, 0) || math.IsInf(p.Y, 0) {
+			continue
+		}
+		pos[p.ID] = [2]float64{p.X, p.Y}
+	}
+	if len(pos) == 0 {
+		return 0, nil
+	}
+	if err := s.repo.SavePositions(pos); err != nil {
+		return 0, err
+	}
+	return len(pos), nil
 }
