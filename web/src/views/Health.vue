@@ -721,6 +721,21 @@ const dimensionLabels: Record<string, string> = {
 
 const dimensionWeights = ref<Record<string, number>>({});
 
+const dimNameMap: Record<string, string> = {
+  // GPU (DCGM)
+  "thermal温度散热": "温度散热",
+  "power功耗电源": "功耗电源",
+  "memory显存可靠性": "显存可靠性",
+  "pcie总线": "PCIe总线",
+  "nvlink片间互连（DCGM）": "NVLink互连",
+  "driver驱动（DCGM）": "驱动",
+  "compute算力性能": "算力性能",
+  // NPU（昇腾）
+  "interconnect昇腾互连通信": "昇腾互连",
+  "reliability昇腾可靠性与运行状态": "可靠性",
+  "auxiliary辅助与效率指标": "辅助效率",
+};
+
 async function openCreateStrategy() {
   console.log('1. openCreateStrategy 开始执行');
   try {
