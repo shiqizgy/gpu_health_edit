@@ -31,14 +31,18 @@
         </div>
 
         <div style="padding: 0 8px 12px">
-        <n-tree
-          block-line
-          :data="treeData"
-          :on-load="onLoad"
-          expand-on-click
-          :node-props="nodeProps"
-        />
-        <div v-if="!treeData.length" class="empty">暂无拓扑，请先运行仿真服务初始化(make sim-init)</div>
+        <n-spin :show="topoLoading">
+          <n-tree
+            block-line
+            :data="treeData"
+            :on-load="onLoad"
+            expand-on-click
+            :node-props="nodeProps"
+          />
+        </n-spin>
+        <div v-if="!treeData.length && !topoLoading" class="empty" @click="topoErr && loadClusters()">
+          {{ topoErr ? '拓扑加载失败：' + topoErr + '（点击重试）' : '暂无拓扑' }}
+        </div>
       </div>
     </div>
 
@@ -101,6 +105,8 @@ const opUUID = ref("");
 const addForm = ref<any>({ uuid: "", cluster_id: 1, node_id: 1, gpu_index: 0, model: "H100-SXM5-80GB" });
 const showMetrics = ref(false);
 const activeUuid = ref("");
+const topoLoading = ref(false);
+const topoErr = ref("");
 
 // ---- 搜索 ----
 const searchKeyword = ref("");
@@ -128,34 +134,46 @@ function openSearchedGPU(g: any) {
 
 // 顶层：加载集群
 async function loadClusters() {
-  const clusters = await api.topoClusters();
-  treeData.value = (clusters || []).map((c: any) => ({
-    key: "c-" + c.id,
-    label: `${c.name} (${c.code})`,
-    raw: c, type: "cluster",
-    isLeaf: false,
-    children: undefined //undefined 才会触发 on-load
-  }));
+  topoLoading.value = true;
+  topoErr.value = "";
+  try {
+    const clusters = await api.topoClusters();
+    treeData.value = (clusters || []).map((c: any) => ({
+      key: "c-" + c.id,
+      label: `${c.name} (${c.code})`,
+      raw: c, type: "cluster", isLeaf: false, children: undefined
+    }));
+    topoErr.value = "";
+  } catch (e: any) {
+    topoErr.value = e?.response?.data?.msg || e?.message || "请求失败"; // 不清空已有树
+  } finally {
+    topoLoading.value = false;
+  }
 }
 
 // 懒加载：点击集群→节点，点击节点→GPU
 //加载完直接给node.children赋值，tree会自动渲染
 async function onLoad(node: any) {
-  if (node.type === "cluster") {
-    const nodes = await api.topoNodes(node.raw.id);
-    node.children = (nodes || []).map((n: any) => ({
-      key: "n-" + n.id,
-      label: `${n.hostname} · ${n.gpu_count}卡`,
-      raw: n, type: "node", isLeaf: false,
-      children: undefined
-    }));
-  } else if (node.type === "node") {
-    const gpus = await api.topoGPUs(node.raw.id);
-    node.children = (gpus || []).map((g: any) => ({
-      key: "g-" + g.uuid,
-      label: `GPU${g.gpu_index} · ${g.uuid}`,
-      raw: g, type: "gpu", isLeaf: true
-    }));
+  try {
+    if (node.type === "cluster") {
+      const nodes = await api.topoNodes(node.raw.id);
+      node.children = (nodes || []).map((n: any) => ({
+        key: "n-" + n.id,
+        label: `${n.hostname} · ${n.gpu_count}卡`,
+        raw: n, type: "node", isLeaf: false,
+        children: undefined
+      }));
+    } else if (node.type === "node") {
+      const gpus = await api.topoGPUs(node.raw.id);
+      node.children = (gpus || []).map((g: any) => ({
+        key: "g-" + g.uuid,
+        label: `GPU${g.gpu_index} · ${g.uuid}`,
+        raw: g, type: "gpu", isLeaf: true
+      }));
+    }
+  } catch (e: any) {
+    message.error("展开失败，请重试");
+    return false;
   }
 }
 

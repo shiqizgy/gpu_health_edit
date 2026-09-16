@@ -36,6 +36,11 @@ func (h *HealthHandler) ClusterSummaries(c *gin.Context) {
 	response.OK(c, list)
 }
 
+var validLevels = map[string]bool{
+	"healthy": true, "sub_healthy": true, "warning": true,
+	"critical": true, "failed": true, "unknown": true,
+}
+
 // ClusterGPUs 点击某个集群：分页展示该集群内每张 GPU 的评分（坏卡置顶）
 func (h *HealthHandler) ClusterGPUs(c *gin.Context) {
 	clusterID, _ := strconv.ParseUint(c.Param("clusterId"), 10, 64)
@@ -44,7 +49,15 @@ func (h *HealthHandler) ClusterGPUs(c *gin.Context) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	list, total, err := h.health.ListSnapshotsByCluster(clusterID, limit, offset)
+	if offset < 0 {
+		offset = 0
+	}
+	level := c.Query("level") // 空 = 全部
+	if level != "" && !validLevels[level] {
+		response.BadRequest(c, "level 取值非法")
+		return
+	}
+	list, total, err := h.health.ListSnapshotsByCluster(clusterID, level, limit, offset)
 	if err != nil {
 		response.ServerError(c, err.Error())
 		return

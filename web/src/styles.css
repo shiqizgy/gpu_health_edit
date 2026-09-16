@@ -66,6 +66,7 @@ html, body, #app {
 .lv-warning     { color: var(--lv-warning);  background: rgba(234,179,8,0.1); }
 .lv-critical    { color: var(--lv-critical); background: rgba(249,115,22,0.1); }
 .lv-failed      { color: var(--lv-failed);   background: rgba(239,68,68,0.12); }
+.lv-unknown     { color: #94a3b8; background: rgba(100,116,139,0.15); }
 
 /* 卡片 */
 .panel {

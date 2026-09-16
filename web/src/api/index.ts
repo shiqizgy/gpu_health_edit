@@ -56,19 +56,27 @@ function parseSSEBlock(block: string, onEvent: (t: string, d: string) => void) {
   onEvent(eventType, dataLines.join("\n"));
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 http.interceptors.response.use(
-  (r) => {
-    // 后端统一响应是 { code, msg, data }，这里直接返回业务 data
-    const body = r.data;
-    if (body && typeof body === "object" && "code" in body) {
-      return body.data;
+    (r) => {
+      const body = r.data;
+      if (body && typeof body === "object" && "code" in body) return body.data;
+      return body;
+    },
+    async (err) => {
+      const cfg: any = err?.config;
+      const method = String(cfg?.method || "get").toLowerCase();
+      const status = err?.response?.status;
+      const retriable = !status || status >= 500; // 超时/断连/网关错误/5xx
+      if (cfg && method === "get" && retriable && (cfg.__retryCount || 0) < 2) {
+        cfg.__retryCount = (cfg.__retryCount || 0) + 1;
+        await sleep(1500 * cfg.__retryCount);
+        return http(cfg);
+      }
+      console.error("API 错误", err?.response?.data || err.message);
+      return Promise.reject(err);
     }
-    return body;
-  },
-  (err) => {
-    console.error("API 错误", err?.response?.data || err.message);
-    return Promise.reject(err);
-  }
 );
 
 export const api = {
@@ -106,8 +114,8 @@ export const api = {
 
   // 健康值
   healthClusters: () => http.get<any, any>("/health/clusters"),
-  healthClusterGPUs: (clusterId: number, limit = 50, offset = 0) =>
-    http.get<any, any>(`/health/clusters/${clusterId}/gpus`, { params: { limit, offset } }),
+  healthClusterGPUs: (clusterId: number, limit = 50, offset = 0, level = "") =>
+      http.get<any, any>(`/health/clusters/${clusterId}/gpus`, {params: { limit, offset, level: level || undefined },}),
   healthGPUDetail: (uuid: string) => http.get<any, any>(`/health/gpus/${uuid}`),
   healthSearch: (q: string) => http.get<any, any>("/health/search", { params: { q } }),
   healthScoreTrend: (uuid: string, params: { from: string; to: string; max_points?: number }) =>

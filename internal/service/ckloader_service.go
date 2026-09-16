@@ -64,6 +64,7 @@ type CKLoaderService struct {
 	deltaHist   map[string]map[string][]deltaSample // uuid -> metricKey -> 增量历史(滑动窗口)
 
 	sampledUUIDs map[string]struct{} //gpu_limit 固定抽样集合（nil=未初始化/全量）
+	sampledSNs   []string            // 抽样集合涉及的机器 SN，用于 CK 窄查询
 }
 
 func NewCKLoaderService(
@@ -302,43 +303,38 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]types.MetricFrame, err
 		window = 5 * time.Minute
 	}
 
-	//查出「当前时间窗口内」有活跃数据上报的所有 source（即集群）列表
-	sources, err := s.ck.ListSources(ctx, s.cfg.Table, window)
-	if err != nil {
-		return nil, fmt.Errorf("查询 source 列表失败: %w", err)
-	}
-	if len(sources) == 0 {
-		logger.L.Warn("CK 近窗口无数据(无活跃source)")
-		return nil, nil
-	}
-
-	//下面内容为初步测试小数量的卡设置
-	// ★ 新增：source 过滤，这里只采集“jiushu”的卡
+	var sources []string
+	var err error
 	if s.cfg.Source != "" {
-		found := false
-		for _, src := range sources {
-			if src == s.cfg.Source {
-				found = true
-				break
-			}
+		sources = []string{s.cfg.Source} // 已指定集群，省掉每分钟一次 DISTINCT source 扫描
+	} else {
+		sources, err = s.ck.ListSources(ctx, s.cfg.Table, window)
+		if err != nil {
+			return nil, fmt.Errorf("查询 source 列表失败: %w", err)
 		}
-		if !found {
-			logger.L.Warnf("配置的 source=%s 在 CK 中无活跃数据", s.cfg.Source)
+		if len(sources) == 0 {
+			logger.L.Warn("CK 近窗口无数据(无活跃source)")
 			return nil, nil
 		}
-		sources = []string{s.cfg.Source}
-		logger.L.Infof("source 过滤: 只采集 %s", s.cfg.Source)
 	}
 
-	//汇总所有集群查询结果的大切片
+	if s.cfg.GPULimit > 0 && s.sampledUUIDs == nil {
+		s.loadSampleFromDB()
+	}
+
 	var allRows []ckclient.SampleRow
-	for _, src := range sources { //逐个集群遍历(当前只有jiushu)
-		rows, err := s.ck.LatestSamplesBySource(ctx, s.cfg.Table, src, window) //查单集群
+	for _, src := range sources {
+		var rows []ckclient.SampleRow
+		if s.cfg.GPULimit > 0 && len(s.sampledSNs) > 0 {
+			rows, err = s.ck.LatestSamplesBySNs(ctx, s.cfg.Table, src, s.sampledSNs, window)
+		} else {
+			rows, err = s.ck.LatestSamplesBySource(ctx, s.cfg.Table, src, window)
+		}
 		if err != nil {
-			logger.L.Warnf("CK 查询 source=%s 失败: %v，跳过", src, err) //单集群失败只跳过
+			logger.L.Warnf("CK 查询 source=%s 失败: %v，跳过", src, err)
 			continue
 		}
-		allRows = append(allRows, rows...) // 拿到所有活跃卡的最新指标
+		allRows = append(allRows, rows...)
 	}
 	if len(allRows) == 0 {
 		logger.L.Warn("CK 近窗口无数据")
@@ -364,6 +360,7 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]types.MetricFrame, err
 	} else if s.sampledUUIDs != nil {
 		// 运行期从抽样切回全量：清空集合，避免残留影响
 		s.sampledUUIDs = nil
+		s.sampledSNs = nil
 		logger.L.Info("gpu_limit=0 全量模式，清空抽样集合")
 	}
 
@@ -439,7 +436,9 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]types.MetricFrame, err
 	}
 
 	// 批量同步拓扑：确保 cluster/node/gpu 记录存在并更新(替代逐卡 upsert,减少 DB 往返)
-	s.syncTopologyBatch(metas, frames, nodeGPUCount)
+	for u := range s.syncTopologyBatch(metas, frames, nodeGPUCount) {
+		delete(frames, u) // 未入库的卡不参与本轮评分，避免写出 cluster_id=0 的快照
+	}
 
 	// 同步"存活指标"到指标健康度 key 表(标记哪些指标本轮有数据)
 	s.syncMetricHealthKey(liveKeys)
@@ -475,6 +474,7 @@ func (s *CKLoaderService) loadOrInitSample(allRows []ckclient.SampleRow) {
 			s.sampledUUIDs[u] = struct{}{}
 		}
 		logger.L.Infof("固定抽样集合从DB加载: %d 张卡", len(s.sampledUUIDs))
+		s.rebuildSampledSNs()
 		return
 	}
 
@@ -499,10 +499,14 @@ func (s *CKLoaderService) loadOrInitSample(allRows []ckclient.SampleRow) {
 	s.persistSampleStatus(allRows)
 
 	logger.L.Infof("固定抽样集合首轮随机初始化: 从 %d 张卡选 %d 张", len(all), len(s.sampledUUIDs))
+	s.rebuildSampledSNs()
 }
 
 // syncTopologyBatch 批量同步拓扑，替代原来的逐卡 ensureCluster/ensureNode/UpsertGPU
-func (s *CKLoaderService) syncTopologyBatch(metas map[string]meta, frames map[string]*types.MetricFrame, nodeGPUCount map[string]int) {
+func (s *CKLoaderService) syncTopologyBatch(metas map[string]meta, frames map[string]*types.MetricFrame, nodeGPUCount map[string]int) map[string]struct{} {
+
+	skipped := map[string]struct{}{}
+
 	// 1. 批量确保 Cluster（集群数极少）
 	sourceSet := map[string]struct{}{}
 	for _, m := range metas {
@@ -569,16 +573,19 @@ func (s *CKLoaderService) syncTopologyBatch(metas map[string]meta, frames map[st
 	for uuid, m := range metas {
 		cid, ok := s.clusterCache[m.source]
 		if !ok {
+			skipped[uuid] = struct{}{}
 			continue
 		}
 		entry, ok := s.nodeCache[m.sn]
 		if !ok {
+			skipped[uuid] = struct{}{}
 			continue
 		}
 		idx, err := strconv.Atoi(m.tags)
 
 		if err != nil {
 			logger.L.Warnf("卡 %s 的 tags=%q 不是合法卡序号，跳过入库", uuid, m.tags)
+			skipped[uuid] = struct{}{}
 			continue
 		}
 
@@ -586,6 +593,7 @@ func (s *CKLoaderService) syncTopologyBatch(metas map[string]meta, frames map[st
 		if cardType == "" {
 			logger.L.Warnf("卡 %s 无法识别设备类型（指标数=%d），本轮跳过评分",
 				uuid, len(frames[uuid].Metrics))
+			skipped[uuid] = struct{}{}
 			continue // ★ 判不出来就别入库，更别去评分
 		}
 		gpus = append(gpus, model.GPUCard{
@@ -601,6 +609,7 @@ func (s *CKLoaderService) syncTopologyBatch(metas map[string]meta, frames map[st
 			logger.L.Errorf("批量 upsert gpu 失败: %v", err)
 		}
 	}
+	return skipped
 }
 
 func (s *CKLoaderService) syncMetricHealthKey(liveKeys map[string]struct{}) {
@@ -707,4 +716,35 @@ func (s *CKLoaderService) persistSampleStatus(allRows []ckclient.SampleRow) {
 			logger.L.Warnf("标记抽中卡 online 失败: %v", err)
 		}
 	}
+}
+
+func (s *CKLoaderService) rebuildSampledSNs() {
+	set := map[string]struct{}{}
+	for u := range s.sampledUUIDs {
+		if i := strings.LastIndex(u, ":"); i > 0 { // uuid = sn:tags，tags 是数字序号
+			set[u[:i]] = struct{}{}
+		}
+	}
+	s.sampledSNs = s.sampledSNs[:0]
+	for sn := range set {
+		s.sampledSNs = append(s.sampledSNs, sn)
+	}
+}
+
+// loadSampleFromDB 重启后先从库里恢复已锁定的抽样集合，成功则本轮即可走窄查询
+func (s *CKLoaderService) loadSampleFromDB() {
+	db := s.topo.DB().Model(&model.GPUCard{}).Where("status = ?", "online")
+	if s.cfg.Source != "" {
+		db = db.Where("cluster_id IN (?)",
+			s.topo.DB().Model(&model.Cluster{}).Select("id").Where("code = ?", s.cfg.Source))
+	}
+	var uuids []string
+	if err := db.Pluck("uuid", &uuids).Error; err != nil || len(uuids) == 0 {
+		return // 保持 nil，后面走原有的首轮随机初始化
+	}
+	s.sampledUUIDs = make(map[string]struct{}, len(uuids))
+	for _, u := range uuids {
+		s.sampledUUIDs[u] = struct{}{}
+	}
+	s.rebuildSampledSNs()
 }

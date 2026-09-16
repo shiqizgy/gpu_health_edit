@@ -7,9 +7,9 @@ server:
 
 mysql:
   # podman 部署时，容器名即主机名；本地直连用 127.0.0.1
-  dsn: "db_write:ys5aG6aYQ1@tcp(write-mysql.test.smartops.jd.local:3358)/gpu_health?charset=utf8&parseTime=True&loc=Local&timeout=1000ms&multiStatements=true"
+  dsn: "db_write:ys5aG6aYQ1@tcp(write-mysql.test.smartops.jd.local:3358)/gpu_health?charset=utf8&parseTime=True&loc=Local&timeout=3s&readTimeout=30s&writeTimeout=30s&multiStatements=true"
   max_open: 50
-  max_idle: 10
+  max_idle: 20
   auto_migrate: true
 
 seed:

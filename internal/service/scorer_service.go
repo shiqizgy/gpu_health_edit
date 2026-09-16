@@ -111,6 +111,21 @@ func (s *ScorerService) RunOnceWith(ctx context.Context, frames []types.MetricFr
 		cardTypeCompiled[cardType] = cs
 	}
 
+	valid := make([]types.MetricFrame, 0, len(frames))
+	for _, f := range frames {
+		if _, ok := bindOf[f.UUID]; ok {
+			valid = append(valid, f)
+		}
+	}
+	if dropped := len(frames) - len(valid); dropped > 0 {
+		logger.L.Warnf("本轮 %d 张卡未在拓扑中注册/非 online，跳过评分", dropped)
+	}
+	frames = valid
+	if len(frames) == 0 {
+		logger.L.Warn("本轮无可评分的已注册卡，跳过")
+		return nil
+	}
+
 	now := time.Now()
 	snaps := make([]model.GPUHealthSnapshot, len(frames))
 	entries := make([]scoring.CardScore, len(frames))
@@ -166,7 +181,7 @@ func (s *ScorerService) RunOnceWith(ctx context.Context, frames []types.MetricFr
 		cardScores[f.UUID] = entries[i]
 	}
 
-	if err := s.health.BatchUpsertSnapshotsConcurrent(snaps, 8); err != nil {
+	if err := s.health.BatchUpsertSnapshotsConcurrent(snaps, 4); err != nil {
 		logger.L.Errorf("写快照失败: %v", err)
 		return err
 	}

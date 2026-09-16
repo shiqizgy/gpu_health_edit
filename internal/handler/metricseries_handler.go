@@ -12,6 +12,7 @@ import (
 	"github.com/gpu-health/platform/internal/repository"
 	"github.com/gpu-health/platform/internal/scoring"
 	"github.com/gpu-health/platform/internal/service"
+	"github.com/gpu-health/platform/pkg/logger"
 	"github.com/gpu-health/platform/pkg/response"
 )
 
@@ -34,12 +35,20 @@ func NewMetricSeriesHandler(ck *ckclient.Client, table string,
 }
 
 type metricSeries struct {
-	Metric      string                 `json:"metric"`
-	DisplayName string                 `json:"display_name"`
+	Metric      string                 `json:"metric"`       // 官方字段名，如 DCGM_FI_DEV_ECC_DBE_AGG_TOTAL
+	OfficialNo  string                 `json:"official_no"`  // 官方编号/说明
+	DisplayName string                 `json:"display_name"` // 中文概念
 	Dimension   string                 `json:"dimension"`
-	Type        string                 `json:"type"` // gauge/counter/xid
+	Type        string                 `json:"type"`
 	Unit        string                 `json:"unit"`
 	Agg         string                 `json:"agg"`
+	Status      string                 `json:"status"`   // ok / no_data / error
+	IsAlive     bool                   `json:"is_alive"` // 近期 CK 是否还有该指标上报
+	Latest      *float64               `json:"latest"`   // 窗口内最后一个值
+	AlertUpper  *float64               `json:"alert_upper"`
+	UpperBound  *float64               `json:"upper_bound"`
+	AlertLower  *float64               `json:"alert_lower"`
+	LowerBound  *float64               `json:"lower_bound"`
 	Points      []ckclient.SeriesPoint `json:"points"`
 }
 
@@ -103,19 +112,10 @@ func (h *MetricSeriesHandler) GPUMetrics(c *gin.Context) {
 		response.ServerError(c, err.Error())
 		return
 	}
-	meta := map[string]struct {
-		disp, dim, unit string
-		typ             int
-	}{}
-	for key, d := range defsMap {
-		meta[key] = struct {
-			disp, dim, unit string
-			typ             int
-		}{disp: d.Conception, dim: d.Dimension, unit: d.Unit, typ: d.ValueType}
-	}
 
 	// 5) 请求的指标（默认给一组代表指标）
 	metrics := splitCSV(c.Query("metrics"))
+	sort.Strings(metrics)
 	if len(metrics) == 0 {
 		compiled := h.resolveStrategy(uuid)
 		if compiled != nil {
@@ -131,38 +131,49 @@ func (h *MetricSeriesHandler) GPUMetrics(c *gin.Context) {
 		From: from, To: to, BucketSec: bucket}
 
 	for _, m := range metrics {
-		md, ok := meta[m]
+		d, ok := defsMap[m]
 		if !ok {
-			continue // 未知指标忽略
+			continue
 		}
-		// XID 走事件
-		if m == xidMetricKey {
+		if m == xidMetricKey { // XID 仍走事件
 			evs, err := h.ck.QueryEvents(ctx, h.table, sn, tags, m, from, to)
 			if err != nil {
-				response.ServerError(c, err.Error())
-				return
+				logger.L.Warnf("查询 %s XID 事件失败: %v", uuid, err)
+				continue
 			}
 			for _, e := range evs {
 				resp.Events = append(resp.Events, metricEvent{Metric: m, TS: e.TS, Code: int(e.V)})
 			}
 			continue
 		}
-		// gauge → avg；counter/duration/level → max
 		agg := "avg"
-		if md.typ == scoring.VTCounter || md.typ == scoring.VTDuration || md.typ == scoring.VTLevel {
+		if d.ValueType == scoring.VTCounter || d.ValueType == scoring.VTDuration || d.ValueType == scoring.VTLevel {
 			agg = "max"
 		}
-		pts, err := h.ck.QuerySeries(ctx, h.table, sn, tags, m, from, to, bucket, agg)
-		if err != nil {
-			response.ServerError(c, err.Error())
-			return
+		s := metricSeries{
+			Metric: m, OfficialNo: d.OfficialNum, DisplayName: d.Conception, Dimension: d.Dimension,
+			Type: valueTypeName(d.ValueType), Unit: d.Unit, Agg: agg, IsAlive: d.IsAlive,
+			Points: []ckclient.SeriesPoint{}, // 保证 JSON 是 [] 而不是 null
 		}
-		resp.Series = append(resp.Series, metricSeries{
-			Metric: m, DisplayName: md.disp, Dimension: md.dim,
-			Type: valueTypeName(md.typ), Unit: md.unit, Agg: agg, Points: pts,
-		})
+		// 只有连续量的阈值和曲线值同一量纲；累计类画的是原始累计值，阈值是速率，不能画在一起
+		if d.ValueType == scoring.VTGauge || d.ValueType == scoring.VTGaugeRate {
+			s.AlertUpper, s.UpperBound, s.AlertLower, s.LowerBound = d.WarnupBound, d.UpperBond, d.WarnlowBound, d.LowerBound
+		}
+		pts, err := h.ck.QuerySeries(ctx, h.table, sn, tags, m, from, to, bucket, agg)
+		switch {
+		case err != nil:
+			s.Status = "error"
+			logger.L.Warnf("查询 %s 指标 %s 失败: %v", uuid, m, err)
+		case len(pts) == 0:
+			s.Status = "no_data"
+		default:
+			s.Status = "ok"
+			s.Points = pts
+			v := pts[len(pts)-1].V
+			s.Latest = &v
+		}
+		resp.Series = append(resp.Series, s)
 	}
-	response.OK(c, resp)
 }
 
 // —— 辅助 ——
@@ -205,11 +216,15 @@ type trendPoint struct {
 	Level string    `json:"level"`
 }
 type trendEvent struct {
-	TS    time.Time `json:"ts"`
+	TS    time.Time `json:"ts"`  // 段开始
+	End   time.Time `json:"end"` // 段结束（新增）
 	Type  string    `json:"type"`
 	Code  int       `json:"code"`
+	Count int       `json:"count"` // 段内上报次数（新增）
+	Fatal bool      `json:"fatal"` // 是否致命 XID（新增）
 	Label string    `json:"label"`
 }
+
 type trendResp struct {
 	UUID      string       `json:"uuid"`
 	From      time.Time    `json:"from"`
@@ -275,13 +290,11 @@ func (h *MetricSeriesHandler) ScoreTrend(c *gin.Context) {
 		if m == xidMetricKey {
 			evs, err := h.ck.QueryEvents(ctx, h.table, sn, tags, m, from, to)
 			if err == nil {
-				for _, e := range evs {
-					code := int(e.V)
-					resp.Events = append(resp.Events, trendEvent{
-						TS: e.TS, Type: "xid", Code: code,
-						Label: "Xid " + itoaLocal(code),
-					})
+				gap := 2 * time.Duration(bucket) * time.Second
+				if gap < 5*time.Minute {
+					gap = 5 * time.Minute
 				}
+				resp.Events = append(resp.Events, mergeXidEvents(evs, gap)...)
 			}
 			// XID 值也参与评分：按事件时刻落到对应桶
 			for _, e := range evs2(evs, err) {
@@ -379,4 +392,24 @@ func valueTypeName(vt int) string {
 	default:
 		return "gauge"
 	}
+}
+
+// mergeXidEvents 把间隔不超过 gap 的同码 XID 合并成一段
+func mergeXidEvents(evs []ckclient.SeriesPoint, gap time.Duration) []trendEvent {
+	sorted := append([]ckclient.SeriesPoint(nil), evs...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].TS.Before(sorted[j].TS) })
+	var out []trendEvent
+	for _, e := range sorted {
+		code := int(e.V)
+		if n := len(out); n > 0 && out[n-1].Code == code && e.TS.Sub(out[n-1].End) <= gap {
+			out[n-1].End = e.TS
+			out[n-1].Count++
+			continue
+		}
+		out = append(out, trendEvent{
+			TS: e.TS, End: e.TS, Type: "xid", Code: code, Count: 1,
+			Fatal: scoring.XIDIsFatal(code), Label: "Xid " + strconv.Itoa(code),
+		})
+	}
+	return out
 }

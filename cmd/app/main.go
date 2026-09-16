@@ -85,6 +85,9 @@ func main() {
 		if err != nil {
 			logger.L.Fatalf("AutoMigrate 失败: %v", err)
 		}
+		if sqlDB, e := db.DB(); e == nil { // 新增：关闭第一次探测用的连接池，避免一个 Pod 占两套连接
+			_ = sqlDB.Close()
+		}
 		db = db2
 	}
 
@@ -184,7 +187,7 @@ func main() {
 			repository.NewFaultEventRepo(db),
 			repository.NewAssistantRepo(db),
 		)
-		retExpr := orDefault(cfg.Retention.Cron, "0 0 3 * * *")
+		retExpr := orDefault(cfg.Retention.Cron, "0 3 * * *")
 		if _, err := c.AddFunc(retExpr, retention.RunOnce); err != nil {
 			logger.L.Fatalf("注册数据清理任务失败: %v", err)
 		}

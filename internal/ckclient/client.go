@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -106,7 +107,10 @@ func (c *Client) doQueryBySource(ctx context.Context, table, source string, wind
 		return nil, err
 	}
 	defer rows.Close()
+	return scanSamples(rows)
+}
 
+func scanSamples(rows *sql.Rows) ([]SampleRow, error) {
 	var out []SampleRow
 	for rows.Next() {
 		var r SampleRow
@@ -116,6 +120,55 @@ func (c *Client) doQueryBySource(ctx context.Context, table, source string, wind
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// LatestSamplesBySNs 抽样模式专用：只拉已锁定机器的数据，避免每分钟全量拉整个 source
+func (c *Client) LatestSamplesBySNs(ctx context.Context, table, source string, sns []string, window time.Duration) ([]SampleRow, error) {
+	const chunk = 500
+	var out []SampleRow
+	for i := 0; i < len(sns); i += chunk {
+		end := i + chunk
+		if end > len(sns) {
+			end = len(sns)
+		}
+		var rows []SampleRow
+		var err error
+		for attempt := 0; attempt < 3; attempt++ {
+			rows, err = c.doQueryBySNs(ctx, table, source, sns[i:end], window)
+			if err == nil {
+				break
+			}
+			time.Sleep(time.Duration(attempt+1) * 2 * time.Second)
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rows...)
+	}
+	return out, nil
+}
+
+func (c *Client) doQueryBySNs(ctx context.Context, table, source string, sns []string, window time.Duration) ([]SampleRow, error) {
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(sns)), ",")
+	q := fmt.Sprintf(`
+        SELECT sn,tags,source,gpu_node_group,ip,mib,argMax(value,timestamp) AS value
+        FROM %s
+        WHERE toDate(dt) >= today()-1
+          AND timestamp >= now()-INTERVAL %d SECOND
+          AND source = ?
+          AND sn IN (%s)
+        GROUP BY sn,tags,source,gpu_node_group,ip,mib`, table, int(window.Seconds()), ph)
+	args := make([]any, 0, len(sns)+1)
+	args = append(args, source)
+	for _, s := range sns {
+		args = append(args, s)
+	}
+	rows, err := c.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSamples(rows)
 }
 
 // LatestSamples 全量查询（保留兼容，小规模场景可用）
@@ -132,16 +185,7 @@ func (c *Client) LatestSamples(ctx context.Context, table string, window time.Du
 		return nil, err
 	}
 	defer rows.Close()
-
-	var out []SampleRow
-	for rows.Next() {
-		var r SampleRow
-		if err := rows.Scan(&r.SN, &r.Tags, &r.Source, &r.NodeGroup, &r.IP, &r.MIB, &r.Value); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
+	return scanSamples(rows)
 }
 
 // LatestByGPU 取某张卡(sn+tags)最近窗口内每个指标的最新值。

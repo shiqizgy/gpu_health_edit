@@ -20,7 +20,8 @@
             :data="clusters"
             :bordered="false"
             size="small"
-            :row-props="clusterRowProps"
+            :loading="clusterLoading"
+            :summary="clusterSummary"
           />
         </div>
 
@@ -40,40 +41,36 @@
         </div>
 
         <!-- 单卡明细(点击集群后展开,分页) -->
-        <div class="panel" v-if="activeCluster" style="margin-top: 16px">
-          <div class="panel-title">
-            集群 {{ activeCluster.cluster_name }} — GPU 评分明细(坏卡置顶)
+        <div class="panel" v-if="activeCluster" ref="gpuPanelRef" style="margin-top: 16px">
+          <div class="panel-title" style="display:flex;align-items:center;gap:12px">
+            <span>
+              集群 {{ activeCluster.cluster_name }} —
+              <span :style="{ color: levelColor(activeLevel) }">{{ activeLevel ? (levelNames[activeLevel] || activeLevel) : '全部' }}</span>
+              GPU（{{ total }} 张）
+            </span>
+            <n-button size="tiny" style="margin-left:auto" @click="collapseGPUs">收起</n-button>
           </div>
-          <n-data-table
-            :columns="gpuCols"
-            :data="gpus"
-            :bordered="false"
-            size="small"
-            :max-height="440"
-          />
+          <n-data-table :columns="gpuCols" :data="gpus" :loading="gpuLoading"
+                        :bordered="false" size="small" :max-height="440" />
           <div class="pager">
-            <n-pagination
-              v-model:page="page"
-              :page-count="pageCount"
-              :page-size="pageSize"
-              @update:page="loadGPUs"
-            />
+            <n-pagination v-model:page="page" :page-count="pageCount" :page-size="pageSize" @update:page="loadGPUs" />
           </div>
         </div>
       </n-tab-pane>
 
-      <!-- 策略管理 -->
       <n-tab-pane name="strategy" tab="评分策略">
-        <div class="toolbar">
-          <span class="hint">不同任务可配置不同的指标权重与维度权重，评分时按集群/卡选择对应策略</span>
-          <n-button type="primary" size="small" @click="openCreateStrategy">+ 新建策略</n-button>
-        </div>
-        <div class="panel">
-          <div class="panel-title">策略列表</div>
-          <n-data-table :columns="strategyCols" :data="strategies" :bordered="false" size="small" />
-        </div>
+      <div class="toolbar">
+        <span class="hint">不同任务可配置不同的指标权重与维度权重，评分时按集群/卡选择对应策略</span>
+        <n-button size="small" @click="loadStrategies">刷新</n-button>
+        <n-button type="primary" size="small" @click="openCreateStrategy">+ 新建策略</n-button>
+      </div>
+      <div class="panel">
+        <div class="panel-title">策略列表</div>
+        <n-data-table :columns="strategyCols" :data="strategies" :loading="strategyLoading"
+                      :row-key="strategyRowKey" :bordered="false" size="small" />
+      </div>
 
-        <div class="panel" v-if="editStrategy" style="margin-top: 16px">
+        <div class="panel" v-if="editStrategy" ref="editPanelRef" style="margin-top: 16px">
           <div class="panel-title">编辑策略：{{ editStrategy.name }}</div>
           <div style="padding: 16px">
                <!-- 基本信息：名称 / 说明 可修改（代码为标识，只读）-->
@@ -91,7 +88,7 @@
                   </div>
                   <div class="weight-item" style="margin-top:12px">
                      <label>说明</label>
-                        <n-input v-model:value="editStrategy.description" type="textarea":autosize="{ minRows: 1, maxRows: 3 }" placeholder="策略说明" />
+                        <n-input v-model:value="editStrategy.description" type="textarea" :autosize="{ minRows: 1, maxRows: 3 }" placeholder="策略说明" />
                   </div>
                </div>
 
@@ -123,7 +120,7 @@
               <span>指标权重 / 曲线 / 一票否决</span>
               <n-button size="tiny" type="primary" ghost @click="showAddMetric = true">+ 添加指标</n-button>
             </div>
-            <n-data-table :columns="ruleCols" :data="editRules" :bordered="false" size="small" :max-height="380" />
+            <n-data-table :columns="ruleCols" :data="editRules" :bordered="false" size="small" :max-height="380" :row-key="ruleRowKey" />
             <n-space justify="end" style="margin-top: 16px">
               <n-button @click="editStrategy = null">取消</n-button>
               <n-button type="primary" @click="saveStrategy">保存（5秒内热加载生效）</n-button>
@@ -158,25 +155,9 @@
         维度权重 <span :class="weightSumOK ? 'sum-ok' : 'sum-bad'">(当前合计: {{ weightSum }},需为 1.0)</span>
       </div>
       <n-grid :cols="4" :x-gap="12" style="margin-bottom: 18px">
-        <n-gi>
-          <div class="weight-label">硬件健康</div>
-          <n-input-number v-model:value="newStrategy.weight_hardware"
-            :min="0" :max="1" :step="0.05" :precision="2" style="width: 100%" />
-        </n-gi>
-        <n-gi>
-          <div class="weight-label">运行稳定性</div>
-          <n-input-number v-model:value="newStrategy.weight_stability"
-            :min="0" :max="1" :step="0.05" :precision="2" style="width: 100%" />
-        </n-gi>
-        <n-gi>
-          <div class="weight-label">性能表现</div>
-          <n-input-number v-model:value="newStrategy.weight_performance"
-            :min="0" :max="1" :step="0.05" :precision="2" style="width: 100%" />
-        </n-gi>
-        <n-gi>
-          <div class="weight-label">运行环境</div>
-          <n-input-number v-model:value="newStrategy.weight_environment"
-            :min="0" :max="1" :step="0.05" :precision="2" style="width: 100%" />
+        <n-gi v-for="(w, key) in newDimWeights" :key="key">
+          <div class="weight-label">{{ dimNameMap[key] || key }}</div>
+          <n-input-number v-model:value="newDimWeights[key]" :min="0" :max="1" :step="0.05" :precision="2" style="width: 100%" />
         </n-gi>
       </n-grid>
 
@@ -310,7 +291,7 @@
 <script setup lang="ts">
 import { useRouter } from "vue-router";
 const router = useRouter();
-import { ref, computed, h, onMounted } from "vue";
+import { ref, computed, h, onMounted, onUnmounted, watch, nextTick } from "vue";
 import { api } from "@/api";
 import { useMessage, useDialog, NButton, NInput, NInputNumber, NSwitch, NSelect } from "naive-ui";
 const dialog = useDialog();
@@ -335,7 +316,7 @@ function scoreColor(s: number) {
   return "#ef4444";
 }
 const levelNames: Record<string, string> = {
-  healthy: "健康", sub_healthy: "亚健康", warning: "警告", critical: "严重", failed: "故障"
+  healthy: "健康", sub_healthy: "亚健康", warning: "警告", critical: "严重", failed: "故障", unknown: "未知"
 };
 
 // ---- 搜索 ----
@@ -361,46 +342,85 @@ function clearHealthSearch() {
   healthSearchResults.value = [];
 }
 
+const clusterSummary = (rows: any[]) => {
+  const sum = (k: string) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+  return {
+    cluster_name: { value: "合计" },
+    total_gpu: { value: sum("total_gpu") },
+    healthy_cnt: { value: sum("healthy_cnt") },
+    sub_healthy_cnt: { value: sum("sub_healthy_cnt") },
+    warning_cnt: { value: sum("warning_cnt") },
+    critical_cnt: { value: sum("critical_cnt") },
+    failed_cnt: { value: sum("failed_cnt") },
+  };
+};
+
+const activeLevel = ref<string>("");            // "" 表示全部
+const gpuLoading = ref(false);
+const gpuPanelRef = ref<HTMLElement | null>(null);
+
+const levelDefs = [
+  { level: "healthy",     key: "healthy_cnt",     title: "健康",   color: "#22c55e" },
+  { level: "sub_healthy", key: "sub_healthy_cnt", title: "亚健康", color: "#84cc16" },
+  { level: "warning",     key: "warning_cnt",     title: "警告",   color: "#eab308" },
+  { level: "critical",    key: "critical_cnt",    title: "严重",   color: "#f97316" },
+  { level: "failed",      key: "failed_cnt",      title: "故障",   color: "#ef4444" },
+  { level: "unknown",     key: "unknown_cnt",     title: "未知",   color: "#94a3b8" },
+];
+const allDef = { level: "", key: "total_gpu", title: "GPU 数", color: "var(--text-0)" };
+
+function levelColor(l: string) {
+  return (levelDefs.find(d => d.level === l) || allDef).color;
+}
+
+function isActive(r: any, level: string) {
+  return activeCluster.value?.cluster_id === r.cluster_id && activeLevel.value === level;
+}
+
+function collapseGPUs() {
+  activeCluster.value = null;
+  activeLevel.value = "";
+  gpus.value = [];
+  total.value = 0;
+}
+
+function toggleLevel(r: any, level: string) {
+  if (isActive(r, level)) { collapseGPUs(); return; }
+  activeCluster.value = r;
+  activeLevel.value = level;
+  page.value = 1;
+  loadGPUs();
+  nextTick(() => gpuPanelRef.value?.scrollIntoView({ behavior: "smooth", block: "start" }));
+}
+
+function levelCell(r: any, d: { level: string; key: string; color: string }) {
+  const cnt = Number(r[d.key] || 0);
+  const active = isActive(r, d.level);
+  return h("span", {
+    class: ["lv-cell", { "lv-cell-active": active, "lv-cell-disabled": cnt === 0 }],
+    style: `color:${d.color}`,
+    title: cnt > 0 ? (active ? "点击收起" : "点击展开该等级的 GPU") : "",
+    onClick: (e: MouseEvent) => { e.stopPropagation(); if (cnt > 0) toggleLevel(r, d.level); },
+  }, [
+    h("span", { class: "mono" }, String(cnt)),
+    cnt > 0 ? h("span", { class: "lv-arrow" }, active ? "▴" : "▾") : null,
+  ]);
+}
+
 const clusterCols = [
   { title: "集群", key: "cluster_name", width: 140 },
   { title: "编号", key: "cluster_code", width: 130,
     render: (r: any) => h("span", { class: "mono", style: "font-size:12px" }, r.cluster_code) },
-  { title: "GPU 数", key: "total_gpu", width: 90,
-    render: (r: any) => h("span", { class: "mono" }, r.total_gpu) },
+  { title: "GPU 数", key: "total_gpu", width: 100, align: "center" as const,
+    render: (r: any) => levelCell(r, allDef) },
   { title: "平均分", key: "avg_score", width: 100,
-    render: (r: any) => h("span", { class: "mono", style: `color:${scoreColor(r.avg_score)};font-weight:600` }, r.avg_score.toFixed(1)) },
-  { title: "健康", key: "healthy_cnt", width: 70, render: (r: any) => h("span", { style: "color:#22c55e" }, r.healthy_cnt) },
-  { title: "亚健康", key: "sub_healthy_cnt", width: 70, render: (r: any) => h("span", { style: "color:#84cc16" }, r.sub_healthy_cnt) },
-  { title: "警告", key: "warning_cnt", width: 70, render: (r: any) => h("span", { style: "color:#eab308" }, r.warning_cnt) },
-  { title: "严重", key: "critical_cnt", width: 70, render: (r: any) => h("span", { style: "color:#f97316" }, r.critical_cnt) },
-  { title: "故障", key: "failed_cnt", width: 70, render: (r: any) => h("span", { style: "color:#ef4444" }, r.failed_cnt) },
-  //{ title: "当前评分策略", key: "bound_strategy_id", width: 140,
-  //  render: (r: any) => {
-  //    const sid = r.bound_strategy_id;
-  //    if (!sid) return h("span", { style: "color:var(--text-2);font-size:12px" }, "默认");
-  //    const s = strategies.value.find((x: any) => x.id === sid);
-  //    return h("span", { style: "font-size:12px;color:var(--accent)" }, s ? s.name : `策略#${sid}`);
-  //  }
-  //},
-  //{ title: "评分策略", key: "strategy", width: 160,render: (r: any) => h(NButton, { size: "tiny", onClick: (e: any) => { e.stopPropagation(); openAssignCluster(r); } },() => "分配策略") }
+    render: (r: any) => h("span", { class: "mono", style: `color:${scoreColor(r.avg_score)};font-weight:600` },
+      Number(r.avg_score ?? 0).toFixed(1)) },
+  ...levelDefs.map(d => ({
+    title: d.title, key: d.key, width: 96, align: "center" as const,
+    render: (r: any) => levelCell(r, d),
+  })),
 ];
-
-function clusterRowProps(row: any) {
-  return {
-    style: "cursor: pointer",
-    onClick: () => {
-          if (activeCluster.value && activeCluster.value.cluster_id === row.cluster_id) {
-            // 如果点击的是当前已展开的集群，则收起
-            activeCluster.value = null;
-          } else {
-            // 否则展开新的集群
-            activeCluster.value = row;
-            page.value = 1;
-            loadGPUs();
-          }
-        }
-  };
-}
 
 const gpuCols = [
   { title: "GPU UUID", key: "gpu_uuid",
@@ -431,14 +451,37 @@ const gpuCols = [
     ]) }
 ];
 
+const clusterLoading = ref(false);
 async function loadClusters() {
-  clusters.value = await api.healthClusters();
+  clusterLoading.value = true;
+  try {
+    const list = await api.healthClusters();
+    clusters.value = Array.isArray(list) ? list : [];
+    // 定时刷新后，同步已展开的集群行，保证格子数字和面板标题一致
+    if (activeCluster.value) {
+      const cur = clusters.value.find((c: any) => c.cluster_id === activeCluster.value.cluster_id);
+      if (cur) activeCluster.value = cur; else collapseGPUs();
+    }
+  } catch (e: any) {
+    message.error("集群汇总加载失败：" + (e?.response?.data?.msg || e?.message || "请求失败") + "，请点刷新重试");
+  } finally {
+    clusterLoading.value = false;
+  }
 }
+
 async function loadGPUs() {
   if (!activeCluster.value) return;
-  const res = await api.healthClusterGPUs(activeCluster.value.cluster_id, pageSize, (page.value - 1) * pageSize);
-  gpus.value = res.items || [];
-  total.value = res.total || 0;
+  gpuLoading.value = true;
+  try {
+    const res = await api.healthClusterGPUs(
+      activeCluster.value.cluster_id, pageSize, (page.value - 1) * pageSize, activeLevel.value);
+    gpus.value = res?.items || [];
+    total.value = res?.total || 0;
+  } catch (e: any) {
+    message.error("单卡明细加载失败：" + (e?.response?.data?.msg || e?.message || "请求失败"));
+  } finally {
+    gpuLoading.value = false;
+  }
 }
 
 // ---- 单卡异常详情(需求1) ----
@@ -547,7 +590,7 @@ async function doAssign() {
 
 // 计算权重总和
 const weightTotal = computed(() => {
-  return Object.values(dimensionWeights.value).reduce((sum, weight) => sum + weight, 0);
+  return Object.values(dimensionWeights.value).reduce((sum, w) => sum + Number(w || 0), 0);
 });
 
 // 验证权重是否有效
@@ -563,8 +606,8 @@ const strategyCols = [
     render: (r: any) => r.is_default ? h("span", { style: "color:#38bdf8" }, "✓") : "" },
   { title: "说明", key: "description" },
   { title: "操作", key: "ops", width: 90,
-    render: (r: any) => h(NButton, { size: "tiny", onClick: () => openEditStrategy(r) }, () => "编辑") }
-];
+        render: (r: any) => h(NButton, { size: "tiny", loading: editLoadingId.value === r.id, onClick: () => openEditStrategy(r) }, () => "编辑") }
+    ];
 
 const curveOptions = [
   { label: "none", value: "none" }, { label: "piecewise", value: "piecewise" },
@@ -602,9 +645,26 @@ const ruleCols = [
 
 ];
 
+const strategyLoading = ref(false);
+const strategyRowKey = (r: any) => r.id;
+const ruleRowKey = (r: any) => r.metric_key;
+
 async function loadStrategies() {
-  strategies.value = await api.strategies();
+  strategyLoading.value = true;
+  try {
+    const list = await api.strategies();
+    strategies.value = Array.isArray(list) ? list : [];
+  } catch (e: any) {
+    message.error("策略列表加载失败：" + (e?.response?.data?.msg || e?.message || "请求失败") + "，请点刷新重试");
+  } finally {
+    strategyLoading.value = false;
+  }
 }
+
+watch(tab, (v) => {
+  if (v === "strategy" && !strategies.value.length && !strategyLoading.value) loadStrategies();
+});
+
 
 // 可添加的指标 = 全量指标里，当前策略还没有的那些
 const addableMetricOptions = computed(() => {
@@ -633,21 +693,44 @@ function doAddMetric() {
   showAddMetric.value = false;
 }
 
-async function openEditStrategy(r: any) {
-  const full = await api.strategy(r.id);
-  editStrategy.value = full;
-  editRules.value = (full.rules || []).map((x: any) => ({ ...x }));
+const editLoadingId = ref<number | null>(null);
+const editPanelRef = ref<HTMLElement | null>(null);
 
-  // 解析维度权重到独立字段
+function parseDimWeights(raw: any): Record<string, number> {
+  let obj: any = raw;
   try {
-    dimensionWeights.value = JSON.parse(full.dimension_weights) || {};
-  } catch (e) {
-    dimensionWeights.value = {};
+    if (typeof obj === "string") obj = JSON.parse(obj);
+    if (typeof obj === "string") obj = JSON.parse(obj); // 兼容被二次转义存储的情况
+  } catch { obj = {}; }
+  const out: Record<string, number> = {};
+  if (obj && typeof obj === "object") {
+    for (const [k, v] of Object.entries(obj)) out[k] = Number(v) || 0;
   }
+  return out;
+}
 
-  // 新增：拉取全量指标，用于"添加指标"下拉
-  const res = await api.metrics({ is_health_key: true, limit: 200 });
-  allMetrics.value = res.items || [];
+async function openEditStrategy(r: any) {
+  editLoadingId.value = r.id;
+  try {
+    const full = await api.strategy(r.id);
+    if (!full || !full.id) throw new Error("策略详情为空");
+    dimensionWeights.value = parseDimWeights(full.dimension_weights);
+    editRules.value = (full.rules || []).map((x: any) => ({ ...x }));
+    editStrategy.value = full;
+    await nextTick();
+    editPanelRef.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (e: any) {
+    message.error("加载策略详情失败：" + (e?.response?.data?.msg || e?.message || "请求失败"));
+    return;
+  } finally {
+    editLoadingId.value = null;
+  }
+  try { // 指标下拉单独加载，失败不影响编辑权重
+    const res = await api.metrics({ is_health_key: true, limit: 200 });
+    allMetrics.value = res?.items || [];
+  } catch {
+    message.warning("指标列表加载失败，“添加指标”暂不可用");
+  }
 }
 
 async function saveStrategy() {
@@ -689,21 +772,22 @@ async function saveStrategy() {
   }
 }
 
-onMounted(() => { loadClusters(); loadStrategies(); });
+let clusterTimer: any;
+onMounted(() => {
+  loadClusters();
+  loadStrategies();
+  clusterTimer = setInterval(loadClusters, 30000);
+});
+onUnmounted(() => clearInterval(clusterTimer));
 
 const showCreateStrategy = ref(false);
 const newStrategy = ref<any>({
   code: "",
   name: "",
   description: "",
-  // 维度权重用四个数字字段
-  weight_hardware: 0.45,
-  weight_stability: 0.25,
-  weight_performance: 0.20,
-  weight_environment: 0.10,
-  // 指标规则列表(从默认策略加载并允许编辑)
   metricRules: [] as any[]
 });
+const newDimWeights = ref<Record<string, number>>({});
 
 // 维度的中文名
 const dimensionLabels: Record<string, string> = {
@@ -739,6 +823,7 @@ const dimNameMap: Record<string, string> = {
 async function openCreateStrategy() {
   console.log('1. openCreateStrategy 开始执行');
   try {
+    if (!strategies.value.length) await loadStrategies();
     if (allMetrics.value.length === 0) {
       console.log('2. 开始加载指标定义');
       const res = await api.metrics({ is_health_key: true, limit: 200 });
@@ -751,6 +836,7 @@ async function openCreateStrategy() {
     if (defStrategy) {
       console.log('5. 开始加载策略详情');
       const full = await api.strategy(defStrategy.id);
+      newDimWeights.value = parseDimWeights(full.dimension_weights);
       console.log('6. 策略详情加载完成:', full);
       defaultRules = (full.rules || []).map((r: any) => ({
         metric_key: r.metric_key,
@@ -764,8 +850,6 @@ async function openCreateStrategy() {
     }
     newStrategy.value = {
       code: "", name: "", description: "",
-      weight_hardware: 0.45, weight_stability: 0.25,
-      weight_performance: 0.20, weight_environment: 0.10,
       metricRules: defaultRules
     };
     console.log('7. 准备显示弹窗, showCreateStrategy 当前值:', showCreateStrategy.value);
@@ -800,11 +884,8 @@ function onRuleWeightChange(ruleKey: string, weight: number) {
 }
 
 // 维度权重和(用 computed 实时显示)
-const weightSum = computed(() => {
-  const w = newStrategy.value;
-  return Number(((w.weight_hardware || 0) + (w.weight_stability || 0)
-    + (w.weight_performance || 0) + (w.weight_environment || 0)).toFixed(4));
-});
+const weightSum = computed(() =>
+  Number(Object.values(newDimWeights.value).reduce((a, b) => a + Number(b || 0), 0).toFixed(4)));
 const weightSumOK = computed(() => Math.abs(weightSum.value - 1) < 0.001);
 
 async function doCreateStrategy() {
@@ -823,10 +904,7 @@ async function doCreateStrategy() {
   }
 
   // 组装维度权重 JSON
-  const dimWeights = JSON.stringify({
-    hardware: f.weight_hardware, stability: f.weight_stability,
-    performance: f.weight_performance, environment: f.weight_environment
-  });
+  const dimWeights = JSON.stringify(newDimWeights.value);
 
   // 组装规则(剥掉 enabled 字段)
   const rules = selected.map((r: any) => ({
@@ -1054,5 +1132,13 @@ async function deleteStrategy(row: any) {
 .gd-faults { display: flex; flex-direction: column; gap: 6px; }
 .gd-fault { display: flex; align-items: center; gap: 10px; padding: 6px 8px; background: var(--bg-2); border-radius: 4px; }
 .gd-fname { font-size: 13px; font-weight: 600; }
+
+.lv-cell { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px;
+  border-radius: 4px; cursor: pointer; border: 1px solid transparent; transition: all .15s; }
+.lv-cell:hover { background: var(--bg-2); border-color: var(--border); }
+.lv-cell-active { background: var(--bg-2); border-color: currentColor; font-weight: 600; }
+.lv-cell-disabled { opacity: .45; cursor: default; }
+.lv-cell-disabled:hover { background: transparent; border-color: transparent; }
+.lv-arrow { font-size: 10px; opacity: .8; }
 
 </style>

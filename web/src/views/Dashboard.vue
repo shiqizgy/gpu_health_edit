@@ -4,27 +4,28 @@
     <div class="stats">
       <div class="stat-card">
         <div class="stat-label">GPU 总数</div>
-        <div class="big-stat stat-val">{{ ov.total_gpu ?? 0 }}</div>
+        <div class="big-stat stat-val">{{ loaded ? ov.total_gpu : '--' }}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">平均健康分</div>
         <div class="big-stat stat-val" :style="{ color: scoreColor(ov.avg_score) }">
-          {{ (ov.avg_score ?? 0).toFixed(1) }}
+          {{ loaded ? (ov.avg_score ?? 0).toFixed(1) : '--' }}
         </div>
       </div>
       <div class="stat-card">
         <div class="stat-label">故障数(critical+failed)</div>
         <div class="big-stat stat-val" :style="{ color: 'var(--lv-failed)' }">
-          {{ ov.fault_count ?? 0 }}
+          {{ loaded ? ov.fault_count : '--' }}
         </div>
       </div>
       <div class="stat-card">
         <div class="stat-label">健康率</div>
         <div class="big-stat stat-val" :style="{ color: 'var(--lv-healthy)' }">
-          {{ healthyPct }}%
+          {{ loaded ? healthyPct + '%' : '--' }}
         </div>
       </div>
     </div>
+    <div v-if="loadErr" class="err-tip">数据加载失败（{{ loadErr }}），当前显示上次成功的数据，15 秒后自动重试</div>
 
     <div class="grid">
       <!-- 等级分布环形图 -->
@@ -43,7 +44,7 @@
             <span class="mono risk-uuid">{{ g.gpu_uuid }}</span>
             <span :class="['level-badge', 'lv-' + g.level]">{{ levelName(g.level) }}</span>
             <span class="mono risk-score" :style="{ color: scoreColor(g.score) }">
-              {{ g.score.toFixed(1) }}
+              {{ Number(g.score ?? 0).toFixed(1) }}
             </span>
           </div>
           <div v-if="!(ov.riskiest || []).length" class="empty">暂无数据，请确认仿真与评分服务已运行</div>
@@ -65,6 +66,9 @@ import { TooltipComponent, LegendComponent } from "echarts/components";
 use([CanvasRenderer, PieChart, TooltipComponent, LegendComponent]);
 
 const ov = ref<any>({ total_gpu: 0, avg_score: 0, fault_count: 0, level_dist: {}, riskiest: [] });
+const loaded = ref(false);
+const loadErr = ref("");
+
 let timer: any;
 
 const levelColors: Record<string, string> = {
@@ -110,8 +114,18 @@ const pieOption = computed(() => {
 });
 
 async function refresh() {
-  try { ov.value = await api.dashboard(); } catch {}
+  try {
+    const res = await api.dashboard();
+    if (res && typeof res === "object") {
+      ov.value = res;
+      loaded.value = true;
+      loadErr.value = "";
+    }
+  } catch (e: any) {
+    loadErr.value = e?.response?.data?.msg || e?.message || "请求失败"; // 保留上一次成功的数据
+  }
 }
+
 onMounted(() => { refresh(); timer = setInterval(refresh, 15000); });
 onUnmounted(() => clearInterval(timer));
 </script>
@@ -127,6 +141,7 @@ onUnmounted(() => clearInterval(timer));
 }
 .stat-label { font-size: 12px; color: var(--text-2); letter-spacing: 0.05em; margin-bottom: 12px; }
 .stat-val { font-size: 38px; color: var(--text-0); }
+.err-tip { color: var(--lv-warning, #eab308); font-size: 12px; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .risk-list { padding: 8px 0; max-height: 300px; overflow: auto; }
 .risk-row {

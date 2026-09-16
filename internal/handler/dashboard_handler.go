@@ -23,20 +23,21 @@ func (h *DashboardHandler) Overview(c *gin.Context) {
 		return
 	}
 	riskN, _ := strconv.Atoi(c.DefaultQuery("risk_n", "10"))
-
+	if riskN <= 0 || riskN > 100 {
+		riskN = 10
+	}
 	riskiest, err := h.health.ListRiskiest(riskN)
 	if err != nil {
 		response.ServerError(c, err.Error())
 		return
 	}
-
-	failedCnt := stats.Levels["failed"] + stats.Levels["critical"]
-
 	response.OK(c, gin.H{
-		"total_gpu":   stats.Total,
-		"avg_score":   stats.AvgScore,
-		"fault_count": failedCnt,
-		"level_dist":  stats.Levels,
-		"riskiest":    riskiest,
+		"total_gpu":      stats.Total,
+		"avg_score":      stats.AvgScore,
+		"fault_count":    stats.Levels["failed"],   // 与健康值页"故障"列同口径
+		"critical_count": stats.Levels["critical"], // 与健康值页"严重"列同口径
+		"level_dist":     stats.Levels,
+		"riskiest":       riskiest,
+		"updated_at":     stats.UpdatedAt,
 	})
 }

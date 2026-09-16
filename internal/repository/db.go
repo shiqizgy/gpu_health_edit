@@ -34,6 +34,7 @@ func NewDB(cfg config.MySQLConfig, debug bool) (*gorm.DB, error) {
 	sqlDB.SetMaxOpenConns(cfg.MaxOpen)         //最大打开连接数（默认无限）。必须设置，否则突发流量会无限创建连接，打爆 MySQL 的 max_connections 限制。
 	sqlDB.SetMaxIdleConns(cfg.MaxIdle)         //最大空闲连接数。如果设置得太小，高并发下会频繁创建和销毁连接，增加延迟；如果设置得太大，会占用 MySQL 资源。
 	sqlDB.SetConnMaxLifetime(30 * time.Minute) //硬编码 30 分钟：连接的最大存活时间。这是为了防止 MySQL 服务端主动断开空闲连接导致客户端报错 bad connection。建议此值略小于 MySQL 服务端的超时时间。
+	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
 
 	//如果配置开关打开，程序启动时会自动根据项目的 Model 结构体去数据库增删改表结构（如新增列、修改字段类型）
 	//开发环境开启，方便本地调试；测试/预发布环境手动执行 SQL；生产环境绝对关闭，由 DBA 通过专业的 pt-online-schema-change 等工具进行变更
