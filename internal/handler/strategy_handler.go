@@ -1,6 +1,10 @@
 package handler
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -57,6 +61,12 @@ func (h *StrategyHandler) Create(c *gin.Context) {
 		response.BadRequest(c, "code 和 dimension_weights 必填")
 		return
 	}
+	dw, err := normalizeDimWeights(req.DimensionWeights)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	req.DimensionWeights = dw
 	s := &model.ScoringStrategy{
 		Code: req.Code, Name: req.Name, Description: req.Description,
 		DimensionWeights: req.DimensionWeights, Rules: req.Rules,
@@ -82,7 +92,12 @@ func (h *StrategyHandler) UpdateMeta(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	if err := h.repo.UpdateMeta(id, req.Name, req.Description, req.DimensionWeights); err != nil {
+	dw, err := normalizeDimWeights(req.DimensionWeights)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if err := h.repo.UpdateMeta(id, req.Name, req.Description, dw); err != nil {
 		response.ServerError(c, err.Error())
 		return
 	}
@@ -169,4 +184,32 @@ func (h *StrategyHandler) BindGPUStrategy(c *gin.Context) {
 		return
 	}
 	response.OK(c, nil)
+}
+
+// normalizeDimWeights 校验并规范化维度权重：
+// 必须是 {"维度名": 数字} 形式的 JSON 对象，权重非负且总和为 1。
+// 返回重新序列化后的 JSON，保证库里永远是"对象 + 数字"，前端和评分引擎都能正确解析。
+func normalizeDimWeights(raw string) (string, error) {
+	var m map[string]float64
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return "", fmt.Errorf("dimension_weights 必须是 {\"维度\": 数字} 形式的 JSON 对象: %v", err)
+	}
+	if len(m) == 0 {
+		return "", errors.New("dimension_weights 不能为空")
+	}
+	sum := 0.0
+	for k, v := range m {
+		if v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+			return "", fmt.Errorf("维度 %s 的权重非法: %v", k, v)
+		}
+		sum += v
+	}
+	if math.Abs(sum-1) > 0.001 {
+		return "", fmt.Errorf("维度权重之和必须为 1，当前为 %.3f", sum)
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }

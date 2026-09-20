@@ -29,11 +29,18 @@
           暂无数据
         </div>
         <div v-for="s in series" :key="s.metric" style="margin-top:16px">
+          <div style="font-size:12px;color:#38bdf8;font-family:monospace">{{ s.metric }}</div>
           <div style="font-size:13px;color:#666;margin-bottom:4px">
             {{ s.display_name || s.metric }}
             <span style="color:#aaa">（{{ s.dimension }} · {{ s.type }}{{ s.unit ? ' · ' + s.unit : '' }}）</span>
           </div>
-          <v-chart :option="chartOption(s)" autoresize style="height:220px" />
+          <div style="position:relative">
+            <v-chart :option="chartOption(s)" autoresize style="height:220px" />
+            <div v-if="!(s.points || []).length"
+                 style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:600;pointer-events:none">
+              指标未采集
+            </div>
+          </div>
         </div>
         <!-- XID 事件单独列出 -->
         <div v-if="events.length" style="margin-top:16px">
@@ -80,12 +87,15 @@ const loading = ref(false)
 
 // 指标目录 → 选择器选项（按维度分组）
 async function loadCatalog() {
-  const defs = await fetchMetricCatalog()
-  metricOptions.value = defs.map(d => ({
-    label: `${d.display_name || d.metric_key}`,
-    value: d.metric_key,
-    // 可按 d.dimension 分组：用 n-select 的 group 需改造，这里从简
-  }))
+  try {
+    const defs = await fetchMetricCatalog()
+    metricOptions.value = defs.map(d => ({
+      label: `${d.concept || d.metric_name}（${d.metric_name}）`,
+      value: d.metric_name,
+    }))
+  } catch (e) {
+    console.error('加载指标目录失败', e)
+  }
 }
 
 function rangeFromTo() {
@@ -117,6 +127,10 @@ async function load() {
     })
     series.value = data.series || []
     events.value = data.events || []
+  } catch (e) {
+    series.value = []
+    events.value = []
+    console.error('加载指标曲线失败', e)
   } finally {
     loading.value = false
   }

@@ -64,25 +64,27 @@
                   <span class="gd-abn-name">{{ m.display_name }}</span>
                   <span class="mono gd-abn-val">{{ fmtNum(m.value) }}<span v-if="m.unit"> {{ m.unit }}</span></span>
                 </div>
+                <div class="gd-metric-key mono" :title="m.metric_key">{{ m.metric_key }}</div>
                 <div class="gd-abn-sub mono">
-                  {{ dimName(m.dimension) }} · {{ thresholdText(m) }} · 得分 {{ m.score.toFixed(0) }}
+                  {{ dimName(m.dimension) }} · {{ thresholdText(m) }} · 得分 {{ Number(m.score ?? 0).toFixed(0) }}
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div class="panel gd-panel">
-          <div class="panel-title">当前故障 {{ faults.length }} 项</div>
-          <div class="gd-abn-list">
-            <div v-if="!faults.length" class="gd-empty-hint" style="padding:12px">暂无进行中的故障事件。</div>
-            <div v-for="f in faults" :key="f.id" class="gd-abn-card"
-                 :class="f.severity === 'warning' ? 'sev-warn' : 'sev-crit'">
-              <div class="gd-abn-head">
-                <span class="gd-abn-name">{{ f.fault_name }}</span>
-                <span class="mono gd-abn-val">{{ fmtNum(f.trigger_value) }}</span>
+          <!-- 当前故障（必须放在左列内部） -->
+          <div class="panel gd-panel">
+            <div class="panel-title">当前故障 {{ faults.length }} 项</div>
+            <div class="gd-abn-list">
+              <div v-if="!faults.length" class="gd-empty-hint" style="padding:12px">暂无进行中的故障事件。</div>
+              <div v-for="f in faults" :key="f.id" class="gd-abn-card"
+                   :class="f.severity === 'warning' ? 'sev-warn' : 'sev-crit'">
+                <div class="gd-abn-head">
+                  <span class="gd-abn-name">{{ f.fault_name }}</span>
+                  <span class="mono gd-abn-val">{{ fmtNum(f.trigger_value) }}</span>
+                </div>
+                <div class="gd-abn-sub mono">{{ f.metric_display || f.metric_key || '—' }} · 开始于 {{ fmtDateTime(f.started_at) }}</div>
               </div>
-              <div class="gd-abn-sub mono">{{ f.metric_display || f.metric_key || '—' }} · 开始于 {{ fmtDateTime(f.started_at) }}</div>
             </div>
           </div>
         </div>
@@ -93,15 +95,17 @@
           <div class="panel gd-panel">
             <div class="panel-title">健康分趋势 <span class="gd-sub">历史回溯 · 事件标注</span></div>
             <div style="padding: 12px 16px">
-              <v-chart v-if="trendPoints.length" :option="trendOption" autoresize style="height: 220px" />
-              <div v-if="trendEvents.length" class="gd-events">
-                <span class="gd-events-title">事件 {{ trendEvents.length }} 段：</span>
-                <span v-for="(e, i) in trendEvents.slice(0, 8)" :key="i" class="gd-event-chip"
-                      :class="e.fatal ? 'chip-fatal' : 'chip-warn'">
-                  {{ e.label }} · {{ fmtClock(e.ts) }}–{{ fmtClock(e.end || e.ts) }} · {{ e.count }} 次
-                </span>
-                <span v-if="trendEvents.length > 8" class="gd-sub">等 {{ trendEvents.length }} 段</span>
-              </div>
+              <template v-if="trendPoints.length">
+                <v-chart :option="trendOption" autoresize style="height: 220px" />
+                <div v-if="trendEvents.length" class="gd-events">
+                  <span class="gd-events-title">事件 {{ trendEvents.length }} 段：</span>
+                  <span v-for="(e, i) in trendEvents.slice(0, 8)" :key="i" class="gd-event-chip"
+                        :class="e.fatal ? 'chip-fatal' : 'chip-warn'">
+                    {{ e.label }} · {{ fmtClock(e.ts) }}–{{ fmtClock(e.end || e.ts) }} · {{ e.count }} 次
+                  </span>
+                  <span v-if="trendEvents.length > 8" class="gd-sub">等 {{ trendEvents.length }} 段</span>
+                </div>
+              </template>
               <div v-else class="gd-empty-hint" style="padding:40px">暂无趋势数据</div>
             </div>
           </div>
@@ -116,24 +120,37 @@
                   <n-radio-button value="abnormal">异常 {{ abnormalKeys.size }}</n-radio-button>
                   <n-radio-button value="nodata">未采集 {{ noDataCount }}</n-radio-button>
                 </n-radio-group>
+                <n-radio-group v-model:value="counterMode" size="small">
+                  <n-radio-button value="delta">计数类：增量</n-radio-button>
+                  <n-radio-button value="raw">累计值</n-radio-button>
+                </n-radio-group>
                 <n-select v-model:value="dimFilter" :options="dimOptions" size="small" clearable
                           placeholder="按维度筛选" style="width: 150px" />
               </div>
             </div>
             <div class="gd-metric-grid">
               <div v-for="s in viewSeries" :key="s.metric" class="gd-metric-cell"
-                   :class="{ 'cell-abn': abnormalKeys.has(s.metric), 'cell-empty': s.status !== 'ok' }">
+                   :class="{ 'cell-abn': abnormalKeys.has(s.metric), 'cell-empty': isEmptySeries(s) }">
                 <div class="gd-metric-head">
-                  <div class="gd-metric-key mono" :title="s.official_no ? `${s.metric}\n${s.official_no}` : s.metric">{{ s.metric }}</div>
-                  <span v-if="s.status === 'ok'" class="mono gd-latest">
-                    {{ fmtNum(s.latest) }}<span v-if="s.unit" class="gd-unit">{{ s.unit }}</span>
+                  <div class="gd-metric-key mono" :title="s.official_no ? `${s.metric}\n${s.official_no}` : s.metric">
+                    {{ s.metric }}
+                  </div>
+                  <span v-if="!isEmptySeries(s)" class="mono gd-latest" :title="`最新值：${s.latest} ${s.unit || ''}`">
+                    {{ fmtWithUnit(s.latest, s.unit) }}
                   </span>
                 </div>
                 <div class="gd-metric-name" :title="s.display_name">
                   {{ s.display_name || '—' }}
+                  <span v-if="isCumulative(s) && counterMode === 'delta' && !isEmptySeries(s)" class="gd-delta-tag">每{{ bucketLabel }}增量</span>
                   <span v-if="abnormalKeys.has(s.metric)" class="gd-abn-tag">异常</span>
                 </div>
-                <v-chart :option="miniOption(s)" autoresize style="height: 120px" />
+                <div class="gd-chart-wrap">
+                  <v-chart :option="miniOption(s)" autoresize style="height: 120px" />
+                  <div v-if="isEmptySeries(s)" class="gd-chart-empty">
+                    <div class="gd-chart-empty-title">指标未采集</div>
+                    <div class="gd-chart-empty-reason">{{ emptyReason(s) }}</div>
+                  </div>
+                </div>
               </div>
               <div v-if="!viewSeries.length" class="gd-empty-hint" style="grid-column:1/-1;padding:30px">
                 {{ series.length ? '当前筛选条件下没有指标' : '暂无指标数据' }}
@@ -373,6 +390,65 @@ function nearestPoint(ts: string, pts: number[][]) {
 }
 
 // ---- 指标小多图 ----
+// 有没有数据以 points 为准；status 只用来区分原因
+function isEmptySeries(s: any) {
+  return !Array.isArray(s?.points) || s.points.length === 0;
+}
+function emptyReason(s: any) {
+  if (s?.status === "error") return "查询失败，请点刷新重试";
+  if (s?.is_alive === false) return "CK 近期无该指标上报";
+  return "所选时间段内无数据";
+}
+
+// 累计类指标（Counter / Counter_Duration）的原始值很大且只增不减，
+// 直接画出来是一条斜线、坐标轴刻度也难以区分，默认改为显示"每个时间桶的增量"
+const counterMode = ref<"delta" | "raw">("delta");
+const seriesBucketSec = ref(60);
+const bucketLabel = computed(() => {
+  const s = seriesBucketSec.value;
+  if (s % 3600 === 0) return `${s / 3600}小时`;
+  if (s % 60 === 0) return `${s / 60}分钟`;
+  return `${s}秒`;
+});
+function isCumulative(s: any) {
+  return s?.type === "counter" || s?.type === "counter_duration";
+}
+function toDelta(data: number[][]) {
+  const out: number[][] = [];
+  for (let i = 1; i < data.length; i++) {
+    const d = data[i][1] - data[i - 1][1];
+    out.push([data[i][0], d >= 0 ? d : data[i][1]]); // 计数器被复位（驱动重载/重启）时，本桶增量取当前值
+  }
+  return out;
+}
+
+// 数值紧凑显示：μs 换算成可读时长，其余大数用 K/M/B，避免坐标轴刻度被截断成"00,000"
+function isMicroSec(unit?: string) {
+  return unit === "μs" || unit === "µs" || unit === "us";
+}
+function fmtCompact(v: any, unit?: string): string {
+  const n = Number(v);
+  if (v === null || v === undefined || !Number.isFinite(n)) return "—";
+  const a = Math.abs(n);
+  const r = (x: number, p = 1) => String(Number(x.toFixed(p)));
+  if (isMicroSec(unit)) {
+    if (a >= 3.6e9) return r(n / 3.6e9) + "h";
+    if (a >= 6e7) return r(n / 6e7) + "min";
+    if (a >= 1e6) return r(n / 1e6) + "s";
+    if (a >= 1e3) return r(n / 1e3) + "ms";
+    return r(n, 0) + "μs";
+  }
+  if (a >= 1e9) return r(n / 1e9, 2) + "B";
+  if (a >= 1e6) return r(n / 1e6, 2) + "M";
+  if (a >= 1e4) return r(n / 1e3, 1) + "K";
+  if (a > 0 && a < 0.01) return n.toExponential(1);
+  return r(n, 2);
+}
+function fmtWithUnit(v: any, unit?: string): string {
+  const t = fmtCompact(v, unit);
+  return t === "—" || !unit || isMicroSec(unit) ? t : `${t} ${unit}`;
+}
+
 function miniOption(s: any) {
   const data = (s.points || []).map((p: any) => [new Date(p.ts).getTime(), p.v]);
   const empty = data.length === 0;
@@ -382,23 +458,14 @@ function miniOption(s: any) {
     type: "time", min: curRange.value.from, max: curRange.value.to,
     axisLabel: { color: "#5e6b78", fontSize: 10 }, axisLine: { lineStyle: { color: "#243040" } },
   };
-  const grid = { left: 40, right: 10, top: 10, bottom: 20 };
+  const grid = { left: 8, right: 10, top: 10, bottom: 20, containLabel: true };
 
   if (empty) {
-    const reason = s.status === "error"
-      ? "查询失败，请点刷新重试"
-      : (s.is_alive === false ? "CK 近期无该指标上报" : "所选时间段内无数据");
+    // 只画空坐标系，与其他小图对齐；"指标未采集"文字由模板里的覆盖层显示
     return {
       grid, xAxis,
       yAxis: { type: "value", min: 0, max: 1, axisLabel: { show: false }, splitLine: { lineStyle: { color: "#1d2733" } } },
       series: [{ type: "line", data: [] }],
-      graphic: [{
-        type: "group", left: "center", top: "middle", silent: true,
-        children: [
-          { type: "text", style: { text: "指标未采集", fill: "#94a3b8", fontSize: 13, fontWeight: 600, align: "center" } },
-          { type: "text", top: 20, style: { text: reason, fill: "#5e6b78", fontSize: 10, align: "center" } },
-        ],
-      }],
     };
   }
 
@@ -413,17 +480,30 @@ function miniOption(s: any) {
   if (s.upper_bound !== s.alert_upper) addLine(s.upper_bound, "正常上界", "#eab308", "dotted");
   addLine(s.alert_lower, "告警下限", "#ef4444", "dashed");
   if (s.lower_bound !== s.alert_lower) addLine(s.lower_bound, "正常下界", "#eab308", "dotted");
+  const delta = isCumulative(s) && counterMode.value === "delta";
+  const plot = delta && data.length > 1 ? toDelta(data) : data;
 
   return {
     grid, xAxis,
-    tooltip: { trigger: "axis", valueFormatter: (v: any) => `${fmtNum(v)}${s.unit ? " " + s.unit : ""}` },
-    yAxis: { type: "value", scale: true, axisLabel: { color: "#5e6b78", fontSize: 10 }, splitLine: { lineStyle: { color: "#1d2733" } } },
+    tooltip: {
+      trigger: "axis",
+      valueFormatter: (v: any) => (delta ? "增量 " : "") + fmtWithUnit(v, s.unit),
+    },
+    yAxis: {
+      type: "value",
+      scale: !delta,            // 增量从 0 开始更直观；连续量用 scale 放大波动
+      min: delta ? 0 : undefined,
+      minInterval: isCumulative(s) ? 1 : undefined,
+      axisLabel: { color: "#5e6b78", fontSize: 10, formatter: (v: number) => fmtCompact(v, s.unit) },
+      splitLine: { lineStyle: { color: "#1d2733" } },
+    },
     series: [{
-      type: "line", showSymbol: false, smooth: s.type !== "counter",
-      step: s.type === "counter" ? "end" : false,
+      type: "line", showSymbol: false,
+      smooth: !isCumulative(s),
+      step: isCumulative(s) ? "end" : false,
       lineStyle: { color, width: 1.5 },
-      areaStyle: isAbn ? { color: "rgba(239,68,68,0.08)" } : undefined,
-      data,
+      areaStyle: isAbn || delta ? { color: isAbn ? "rgba(239,68,68,0.08)" : "rgba(249,115,22,0.08)" } : undefined,
+      data: plot,
       markLine: lines.length ? { silent: true, symbol: "none", data: lines } : undefined,
     }],
   };
@@ -451,6 +531,7 @@ async function loadDetail() {
 async function loadTrend() {
   const { from, to } = rangeFromTo();
   const res = await api.healthScoreTrend(uuid, { from, to, max_points: 300 });
+  if (!res || typeof res !== "object") throw new Error("健康分趋势接口返回为空");
   trendPoints.value = res.points || [];
   trendEvents.value = res.events || [];
   trendBucketSec.value = res.bucket_sec || 60;
@@ -459,10 +540,10 @@ async function loadTrend() {
 async function loadSeries() {
   const { from, to } = rangeFromTo();
   curRange.value = { from: new Date(from).getTime(), to: new Date(to).getTime() };
-  const res = await api.healthGPUMetrics(uuid, {
-    from, to, max_points: 500,
-  });
-  series.value = res.series || [];
+  const res = await api.healthGPUMetrics(uuid, { from, to, max_points: 500 });
+  if (!res || typeof res !== "object") throw new Error("指标明细接口返回为空");
+    series.value = Array.isArray(res.series) ? res.series : [];
+    seriesBucketSec.value = res.bucket_sec || 60;
 }
 
 async function reloadTimeSeries() {
@@ -470,7 +551,7 @@ async function reloadTimeSeries() {
   try {
     await Promise.all([loadTrend(), loadSeries()]);
   } catch (e: any) {
-    message.error(e?.response?.data?.msg || "加载时序失败");
+    message.error(e?.response?.data?.msg || e?.message || "加载时序失败");
   } finally {
     loading.value = false;
   }
@@ -481,7 +562,7 @@ async function reloadAll() {
   try {
     await Promise.all([loadDetail(), loadTrend(), loadSeries()]);
   } catch (e: any) {
-    message.error(e?.response?.data?.msg || "加载详情失败");
+    message.error(e?.response?.data?.msg || e?.message || "加载详情失败");
   } finally {
     loading.value = false;
   }
@@ -555,4 +636,15 @@ onMounted(reloadAll);
 .gd-info span { color: var(--text-0); text-align: right; word-break: break-all; }
 
 .gd-unit { color: var(--text-2); font-size: 11px; margin-left: 4px; }
+.gd-chart-wrap { position: relative; }
+.gd-delta-tag { font-size: 10px; color: #fdba74; background: rgba(249,115,22,.12);
+  padding: 0 5px; border-radius: 3px; margin-left: 4px; }
+.gd-chart-empty {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.gd-chart-empty-title { font-size: 13px; font-weight: 600; color: #94a3b8; }
+.gd-chart-empty-reason { font-size: 11px; color: #5e6b78; margin-top: 4px; }
+
 </style>

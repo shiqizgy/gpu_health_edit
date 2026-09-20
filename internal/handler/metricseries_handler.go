@@ -115,7 +115,6 @@ func (h *MetricSeriesHandler) GPUMetrics(c *gin.Context) {
 
 	// 5) 请求的指标（默认给一组代表指标）
 	metrics := splitCSV(c.Query("metrics"))
-	sort.Strings(metrics)
 	if len(metrics) == 0 {
 		compiled := h.resolveStrategy(uuid)
 		if compiled != nil {
@@ -125,6 +124,7 @@ func (h *MetricSeriesHandler) GPUMetrics(c *gin.Context) {
 			}
 		}
 	}
+	sort.Strings(metrics) // 放在填充之后，默认列表顺序才稳定
 
 	ctx := c.Request.Context()
 	resp := seriesResp{UUID: uuid, SN: sn, GPUIndex: g.GPUIndex,
@@ -174,6 +174,7 @@ func (h *MetricSeriesHandler) GPUMetrics(c *gin.Context) {
 		}
 		resp.Series = append(resp.Series, s)
 	}
+	response.OK(c, resp)
 }
 
 // —— 辅助 ——

@@ -5,7 +5,7 @@
       <n-tab-pane name="scores" tab="集群健康度">
         <div class="toolbar">
           <n-button size="small" @click="loadClusters">刷新</n-button>
-          <span class="hint">点击集群行查看该集群内每张 GPU 的评分</span>
+          <span class="hint">点击各健康等级的数字，展开该等级的 GPU 列表；点击“GPU 数”展开全部</span>
           <n-input-group style="width: 360px; margin-left: auto;">
             <n-input v-model:value="healthSearchKeyword" placeholder="搜索 GPU（UUID 模糊匹配）" size="small" clearable @clear="clearHealthSearch" />
             <n-button size="small" type="primary" @click="doHealthSearch">搜索</n-button>

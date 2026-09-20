@@ -40,8 +40,8 @@
             :node-props="nodeProps"
           />
         </n-spin>
-        <div v-if="!treeData.length && !topoLoading" class="empty" @click="topoErr && loadClusters()">
-          {{ topoErr ? '拓扑加载失败：' + topoErr + '（点击重试）' : '暂无拓扑' }}
+        <div v-if="!treeData.length && !topoLoading" class="empty" style="cursor:pointer" @click="loadClusters()">
+          {{ topoErr ? '拓扑加载失败：' + topoErr + '（点击重试）' : '暂无拓扑（点击重试）' }}
         </div>
       </div>
     </div>
@@ -133,21 +133,28 @@ function openSearchedGPU(g: any) {
 }
 
 // 顶层：加载集群
-async function loadClusters() {
+async function loadClusters(retry = 2) {
   topoLoading.value = true;
   topoErr.value = "";
+  let retrying = false;
   try {
     const clusters = await api.topoClusters();
+    // 线上至少有一个集群；返回空列表属于异常情况，稍后自动重试，避免一直停在"暂无拓扑"
+    if ((!clusters || !clusters.length) && retry > 0) {
+      console.warn("拓扑集群列表为空，2 秒后重试");
+      retrying = true;
+      setTimeout(() => loadClusters(retry - 1), 2000);
+      return;
+    }
     treeData.value = (clusters || []).map((c: any) => ({
       key: "c-" + c.id,
       label: `${c.name} (${c.code})`,
       raw: c, type: "cluster", isLeaf: false, children: undefined
     }));
-    topoErr.value = "";
   } catch (e: any) {
     topoErr.value = e?.response?.data?.msg || e?.message || "请求失败"; // 不清空已有树
   } finally {
-    topoLoading.value = false;
+    if (!retrying) topoLoading.value = false; // 重试等待期间保持 loading，不闪"暂无拓扑"
   }
 }
 
@@ -211,7 +218,7 @@ async function setStatus(status: string) {
   }
 }
 
-onMounted(loadClusters);
+onMounted(() => loadClusters());
 </script>
 
 <style scoped>

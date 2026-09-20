@@ -68,7 +68,7 @@ func (c *DeepSeekClient) ChatStream(ctx context.Context, messages []Message, too
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			fmt.Printf("关闭失败: %w", err)
+			fmt.Printf("关闭失败: %v", err)
 		}
 	}()
 

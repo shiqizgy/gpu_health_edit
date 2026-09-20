@@ -1,6 +1,9 @@
 package router
 
 import (
+	"os"
+	"time"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/gpu-health/platform/internal/ckclient"
@@ -16,6 +19,16 @@ import (
 func Setup(db *gorm.DB, assistantCfg config.AssistantConfig, ck *ckclient.Client, table string) *gin.Engine {
 	//gin.Default() 自动挂载了两个中间件：Logger（记录请求日志）和 Recovery（捕获 panic 返回 500）
 	r := gin.Default()
+
+	// 诊断用：每个响应都带上处理它的实例名和进程启动时间，
+	// 页面出现 no data 时在浏览器 Network 里一眼就能看出是哪个实例、是否刚重启过
+	instance, _ := os.Hostname()
+	startedAt := time.Now().Format(time.RFC3339)
+	r.Use(func(c *gin.Context) {
+		c.Header("X-Backend-Instance", instance)
+		c.Header("X-Backend-Started", startedAt)
+		c.Next()
+	})
 
 	// CORS：允许前端开发服务器（Vite 默认 5173 端口）跨域调用后端 API
 	// 这个配置目前只允许localhost，如果前端部署在独立域名，需要把该域名加入AllowOrigins，或改为AllowOrigins: []string{"*"}（一般不推荐）。
@@ -57,6 +70,9 @@ func Setup(db *gorm.DB, assistantCfg config.AssistantConfig, ck *ckclient.Client
 	kgH := handler.NewKGHandler(kgSvc)
 
 	api := r.Group("/api/v1")
+	api.GET("/version", func(c *gin.Context) {
+		c.JSON(200, gin.H{"code": 0, "msg": "ok", "data": gin.H{"instance": instance, "started_at": startedAt}})
+	})
 	{
 		// 健康大盘
 		api.GET("/dashboard/overview", dashboardH.Overview)

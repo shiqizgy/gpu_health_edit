@@ -74,7 +74,9 @@ http.interceptors.response.use(
         await sleep(1500 * cfg.__retryCount);
         return http(cfg);
       }
-      console.error("API 错误", err?.response?.data || err.message);
+      console.error("API 错误", cfg?.url, status ?? "网络/超时",
+          "实例:", err?.response?.headers?.["x-backend-instance"] ?? "-",
+          err?.response?.data || err.message);
       return Promise.reject(err);
     }
 );
@@ -120,7 +122,7 @@ export const api = {
   healthSearch: (q: string) => http.get<any, any>("/health/search", { params: { q } }),
   healthScoreTrend: (uuid: string, params: { from: string; to: string; max_points?: number }) =>
       http.get<any, any>(`/health/gpus/${uuid}/score-trend`, { params }),
-  healthGPUMetrics: (uuid: string, params: { metrics: string; from: string; to: string; max_points?: number }) =>
+  healthGPUMetrics: (uuid: string, params: { metrics?: string; from: string; to: string; max_points?: number }) =>
       http.get<any, any>(`/health/gpus/${uuid}/metrics`, { params }),
 
 

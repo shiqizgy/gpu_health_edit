@@ -22,7 +22,7 @@
           <main class="main">
             <header class="topbar">
               <div class="crumb">{{ currentTitle }}</div>
-              <div class="clock mono">{{ clock }}</div>
+              <div class="clock mono" :title="`前端构建时间 ${buildTime}`">{{ clock }} · build {{ buildTime }}</div>
             </header>
             <div class="content">
               <router-view />
@@ -108,6 +108,8 @@ const overrides = {
 
 // 顶栏时钟
 const clock = ref("");
+declare const __APP_BUILD__: string; // 由 vite.config.ts 的 define 注入
+const buildTime = __APP_BUILD__;
 let timer: any;
 function tick() {
   const d = new Date();

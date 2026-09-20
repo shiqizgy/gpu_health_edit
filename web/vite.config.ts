@@ -4,6 +4,10 @@ import { fileURLToPath, URL } from "node:url";
 
 export default defineConfig({
   plugins: [vue()],
+  // 构建时间戳：用于确认线上跑的是不是最新前端
+  define: {
+    __APP_BUILD__: JSON.stringify(new Date().toLocaleString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" })),
+  },
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) }
   },
