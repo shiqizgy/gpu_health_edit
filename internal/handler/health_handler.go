@@ -79,6 +79,10 @@ type gpuMeta struct {
 	GPUIndex    int    `json:"gpu_index"`
 	Model       string `json:"model"`
 	SN          string `json:"sn"`
+	VRAM        string `json:"vram"`
+	Platform    string `json:"platform"`
+	PodID       string `json:"pod_id"`
+	IdcID       string `json:"idc_id"`
 }
 
 // GPUDetail 单卡评分详情：snapshot + dimensions(雷达) + abnormal + faults + meta
@@ -116,6 +120,10 @@ func (h *HealthHandler) GPUDetail(c *gin.Context) {
 				GPUIndex:    m.GPUIndex,
 				Model:       m.Model,
 				SN:          m.SN,
+				VRAM:        m.VRAM,
+				Platform:    m.Platform,
+				PodID:       m.PodID,
+				IdcID:       m.IdcID,
 			}
 		}
 	}

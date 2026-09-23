@@ -33,7 +33,7 @@ ck:
   database: monitor                 # 数据库名
   username: read_db_monitor         # 用户名
   password: OvOYQmI39wzWTUsxPs-E    # 密码，没有则留空
-  table: monitor_gpu_all_metric_dist  # 填写表名
+  table: monitor_gpu_all_metric_v2_dist  # 填写表名
   cron: "@every 1m"
   window_sec: 300
   metric_ttl: 300

@@ -80,14 +80,13 @@ func (h *MetricSeriesHandler) GPUMetrics(c *gin.Context) {
 	}
 	uuid := c.Param("uuid")
 
-	// 1) 解析 uuid → sn / tags（稳健：查库而非拆字符串）
+	// 1) 校验卡是否存在；uuid 即 CK 里的 gpu_sn，直接用于查询
 	g, err := h.topo.GetGPUByUUID(uuid)
 	if err != nil {
 		response.Fail(c, 404, "GPU 不存在")
 		return
 	}
 	sn := g.SN
-	tags := strconv.Itoa(g.GPUIndex)
 
 	// 2) 时间范围（默认近 24h，RFC3339）
 	to := parseTime(c.Query("to"), time.Now())
@@ -136,7 +135,7 @@ func (h *MetricSeriesHandler) GPUMetrics(c *gin.Context) {
 			continue
 		}
 		if m == xidMetricKey { // XID 仍走事件
-			evs, err := h.ck.QueryEvents(ctx, h.table, sn, tags, m, from, to)
+			evs, err := h.ck.QueryEvents(ctx, h.table, uuid, m, from, to)
 			if err != nil {
 				logger.L.Warnf("查询 %s XID 事件失败: %v", uuid, err)
 				continue
@@ -159,7 +158,7 @@ func (h *MetricSeriesHandler) GPUMetrics(c *gin.Context) {
 		if d.ValueType == scoring.VTGauge || d.ValueType == scoring.VTGaugeRate {
 			s.AlertUpper, s.UpperBound, s.AlertLower, s.LowerBound = d.WarnupBound, d.UpperBond, d.WarnlowBound, d.LowerBound
 		}
-		pts, err := h.ck.QuerySeries(ctx, h.table, sn, tags, m, from, to, bucket, agg)
+		pts, err := h.ck.QuerySeries(ctx, h.table, uuid, m, from, to, bucket, agg)
 		switch {
 		case err != nil:
 			s.Status = "error"
@@ -246,13 +245,10 @@ func (h *MetricSeriesHandler) ScoreTrend(c *gin.Context) {
 	}
 	uuid := c.Param("uuid")
 
-	g, err := h.topo.GetGPUByUUID(uuid)
-	if err != nil {
+	if _, err := h.topo.GetGPUByUUID(uuid); err != nil { // uuid 即 CK 的 gpu_sn
 		response.Fail(c, 404, "GPU 不存在")
 		return
 	}
-	sn := g.SN
-	tags := strconv.Itoa(g.GPUIndex)
 
 	to := parseTime(c.Query("to"), time.Now())
 	from := parseTime(c.Query("from"), to.Add(-6*time.Hour))
@@ -289,7 +285,7 @@ func (h *MetricSeriesHandler) ScoreTrend(c *gin.Context) {
 
 	for _, m := range metricKeys {
 		if m == xidMetricKey {
-			evs, err := h.ck.QueryEvents(ctx, h.table, sn, tags, m, from, to)
+			evs, err := h.ck.QueryEvents(ctx, h.table, uuid, m, from, to)
 			if err == nil {
 				gap := 2 * time.Duration(bucket) * time.Second
 				if gap < 5*time.Minute {
@@ -312,7 +308,7 @@ func (h *MetricSeriesHandler) ScoreTrend(c *gin.Context) {
 			(d.ValueType == scoring.VTCounter || d.ValueType == scoring.VTDuration || d.ValueType == scoring.VTLevel) {
 			agg = "max"
 		}
-		pts, err := h.ck.QuerySeries(ctx, h.table, sn, tags, m, from, to, bucket, agg)
+		pts, err := h.ck.QuerySeries(ctx, h.table, uuid, m, from, to, bucket, agg)
 		if err != nil {
 			continue
 		}

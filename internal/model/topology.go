@@ -18,13 +18,16 @@ func (Cluster) TableName() string { return "cluster" }
 
 // Node 节点表（三级拓扑的中间层，即物理服务器）
 type Node struct {
-	ID        uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	ClusterID uint64    `gorm:"index;not null" json:"cluster_id"`                       // 所属集群
-	Hostname  string    `gorm:"type:varchar(128);uniqueIndex;not null" json:"hostname"` // 主机名
-	IP        string    `gorm:"type:varchar(64)" json:"ip"`                             // 管理 IP
-	GPUCount  int       `gorm:"default:8" json:"gpu_count"`                             // 该节点 GPU 数
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	ClusterID  uint64    `gorm:"index;not null" json:"cluster_id"`                       // 所属集群
+	Hostname   string    `gorm:"type:varchar(128);uniqueIndex;not null" json:"hostname"` // 主机名
+	IP         string    `gorm:"type:varchar(64)" json:"ip"`                             // 管理 IP
+	GPUCount   int       `gorm:"default:8" json:"gpu_count"`                             // 该节点 GPU 数
+	PodID      string    `gorm:"type:varchar(64);index" json:"pod_id"`                   // 所属 POD（来自 CK pod_id）
+	BuildingID string    `gorm:"type:varchar(64)" json:"building_id"`                    // 楼宇/数据中心（来自 CK building_id）
+	IdcID      string    `gorm:"type:varchar(64);index" json:"idc_id"`                   // 机房（来自 CK idc_id）
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 func (Node) TableName() string { return "node" }
@@ -44,7 +47,9 @@ type GPUCard struct {
 	NodeID     uint64    `gorm:"index;not null" json:"node_id"`                                 // 所属节点
 	ClusterID  uint64    `gorm:"index;not null" json:"cluster_id"`                              // 所属集群(冗余,加速聚合)
 	GPUIndex   int       `gorm:"column:gpu_index;not null" json:"gpu_index"`                    // 卡在节点内的序号 0-7
-	Model      string    `gorm:"type:varchar(64)" json:"model"`                                 // 型号 如 H100-SXM5-80GB
+	Model      string    `gorm:"type:varchar(64)" json:"model"`                                 // 型号 如 H100-SXM5-80GB（来自 CK gpu_model）
+	VRAM       string    `gorm:"type:varchar(32)" json:"vram"`                                  // 显存（来自 CK gpu_vram）
+	Platform   string    `gorm:"type:varchar(64)" json:"platform"`                              // 平台（来自 CK gpu_plat）
 	Status     string    `gorm:"type:varchar(32);not null;default:online" json:"status"`        // online/offline/maintenance
 	Vendor     string    `gorm:"type:varchar(32);index;not null;default:unknown" json:"vendor"` // nvidia/huawei/unknown
 	CardType   string    `gorm:"type:varchar(16);index;not null;default:GPU" json:"card_type"`  // ★ GPU / NPU

@@ -179,13 +179,18 @@ type GPUDetailMeta struct {
 	GPUIndex    int    `gorm:"column:gpu_index"`
 	Model       string `gorm:"column:model"`
 	SN          string `gorm:"column:sn"`
+	VRAM        string `gorm:"column:vram"`
+	Platform    string `gorm:"column:platform"`
+	PodID       string `gorm:"column:pod_id"`
+	IdcID       string `gorm:"column:idc_id"`
 }
 
 // GetGPUDetailMeta 按 uuid 关联查 集群名/节点IP/卡序号/型号/SN
 func (r *TopologyRepo) GetGPUDetailMeta(uuid string) (*GPUDetailMeta, error) {
 	var m GPUDetailMeta
 	err := r.db.Table("gpu_card AS g").
-		Select("c.name AS cluster_name, n.ip AS node_ip, g.gpu_index AS gpu_index, g.model AS model, g.sn AS sn").
+		Select("c.name AS cluster_name, n.ip AS node_ip, g.gpu_index AS gpu_index, g.model AS model, g.sn AS sn, "+
+			"g.vram AS vram, g.platform AS platform, n.pod_id AS pod_id, n.idc_id AS idc_id").
 		Joins("JOIN node n ON n.id = g.node_id").
 		Joins("JOIN cluster c ON c.id = g.cluster_id").
 		Where("g.uuid = ?", uuid).

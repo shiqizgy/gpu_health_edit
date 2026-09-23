@@ -63,8 +63,8 @@ type CKLoaderService struct {
 	counterKeys map[string]counterMeta              //metricKey -> 换算元数据
 	deltaHist   map[string]map[string][]deltaSample // uuid -> metricKey -> 增量历史(滑动窗口)
 
-	sampledUUIDs map[string]struct{} //gpu_limit 固定抽样集合（nil=未初始化/全量）
-	sampledSNs   []string            // 抽样集合涉及的机器 SN，用于 CK 窄查询
+	sampledUUIDs  map[string]struct{} //gpu_limit 固定抽样集合（nil=未初始化/全量）
+	sampledGPUSNs []string            // 抽样集合的 gpu_sn 列表，用于 CK 窄查询
 }
 
 func NewCKLoaderService(
@@ -86,14 +86,6 @@ func NewCKLoaderService(
 		prevTS:       map[string]int64{},
 		deltaHist:    map[string]map[string][]deltaSample{},
 	}
-}
-
-func gpuUUID(sn, tags string) string {
-	sn, tags = strings.TrimSpace(sn), strings.TrimSpace(tags)
-	if sn == "" || tags == "" {
-		return ""
-	}
-	return sn + ":" + tags
 }
 
 func normalizeMIB(mib string) string { return mib }
@@ -295,7 +287,11 @@ func (s *CKLoaderService) windowSum(uuid, key string, now int64, delta, windowSe
 	return sum
 }
 
-type meta struct{ source, sn, ip, tags string }
+type meta struct {
+	source, sn, ip, tags      string
+	model, vendor, vram, plat string // v2 表带的机型信息
+	podID, buildingID, idcID  string // v2 表带的机房信息
+}
 
 func (s *CKLoaderService) Collect(ctx context.Context) ([]types.MetricFrame, error) {
 	window := time.Duration(s.cfg.WindowSec) * time.Second //时间窗口设置
@@ -325,8 +321,8 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]types.MetricFrame, err
 	var allRows []ckclient.SampleRow
 	for _, src := range sources {
 		var rows []ckclient.SampleRow
-		if s.cfg.GPULimit > 0 && len(s.sampledSNs) > 0 {
-			rows, err = s.ck.LatestSamplesBySNs(ctx, s.cfg.Table, src, s.sampledSNs, window)
+		if s.cfg.GPULimit > 0 && len(s.sampledGPUSNs) > 0 {
+			rows, err = s.ck.LatestSamplesByGPUSNs(ctx, s.cfg.Table, src, s.sampledGPUSNs, window)
 		} else {
 			rows, err = s.ck.LatestSamplesBySource(ctx, s.cfg.Table, src, window)
 		}
@@ -350,7 +346,7 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]types.MetricFrame, err
 		}
 		filtered := make([]ckclient.SampleRow, 0, len(allRows))
 		for _, r := range allRows {
-			if _, ok := s.sampledUUIDs[gpuUUID(r.SN, r.Tags)]; ok {
+			if _, ok := s.sampledUUIDs[strings.TrimSpace(r.GPUSN)]; ok {
 				filtered = append(filtered, r) // 只保留抽中卡的行
 			}
 		}
@@ -360,7 +356,7 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]types.MetricFrame, err
 	} else if s.sampledUUIDs != nil {
 		// 运行期从抽样切回全量：清空集合，避免残留影响
 		s.sampledUUIDs = nil
-		s.sampledSNs = nil
+		s.sampledGPUSNs = nil
 		logger.L.Info("gpu_limit=0 全量模式，清空抽样集合")
 	}
 
@@ -396,21 +392,23 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]types.MetricFrame, err
 	skipped := 0
 	// 遍历所有扁平行(每行 = 某张卡的某个指标的最新值),按卡聚合
 	for _, r := range allRows { //遍历每一条扁平行数据
-		//tag为卡序号，为空说明世界点指标或上游漏打标签
-		// 拼成的 uuid 会把整个节点的行合并成一张"幽灵卡"，必须丢弃，
-		//todo 后续调整：用卡的uuid来指代
-		if strings.TrimSpace(r.Tags) == "" {
+		// v2 表用 gpu_sn 唯一标识一张卡：tags(卡号)可能为空，不再参与身份判定
+		uuid := strings.TrimSpace(r.GPUSN)
+		if uuid == "" {
 			skipped++
 			continue
 		}
-		uuid := gpuUUID(r.SN, r.Tags) //SN:Tags 拼出GPU卡的唯一标识
 
 		// 该卡的帧第一次出现时初始化,并记录其元信息
 		f, ok := frames[uuid]
 		if !ok {
 			f = &types.MetricFrame{UUID: uuid, TS: now, Metrics: map[string]float64{}}
 			frames[uuid] = f
-			metas[uuid] = meta{r.Source, r.SN, r.IP, r.Tags} //顺便记元信息(只记一次)，也就是这张卡的基本信息
+			metas[uuid] = meta{ //顺便记元信息(只记一次)，也就是这张卡的基本信息
+				source: r.Source, sn: r.SN, ip: r.IP, tags: r.Tags,
+				model: r.Model, vendor: r.Vendor, vram: r.VRAM, plat: r.Plat,
+				podID: r.PodID, buildingID: r.BuildingID, idcID: r.IdcID,
+			}
 		}
 		mib := normalizeMIB(r.MIB) // 规范化指标名(统一命名/去噪)
 		val := r.Value
@@ -421,7 +419,7 @@ func (s *CKLoaderService) Collect(ctx context.Context) ([]types.MetricFrame, err
 		liveKeys[mib] = struct{}{} // 记录该指标本轮存活
 	}
 	if skipped > 0 {
-		logger.L.Warnf("本轮丢弃 %d 行 tag 为空的数据（无法定位到具体卡）", skipped)
+		logger.L.Warnf("本轮丢弃 %d 行 gpu_sn 为空的数据（无法定位到具体卡）", skipped)
 	}
 	// 先把多通道指标聚合成单条，再做增量/速率换算
 	for _, f := range frames {
@@ -481,7 +479,9 @@ func (s *CKLoaderService) loadOrInitSample(allRows []ckclient.SampleRow) {
 	// 2) DB 无 online 卡 → 首轮随机初始化
 	uuidSet := make(map[string]struct{}, len(allRows))
 	for _, r := range allRows {
-		uuidSet[gpuUUID(r.SN, r.Tags)] = struct{}{}
+		if g := strings.TrimSpace(r.GPUSN); g != "" {
+			uuidSet[g] = struct{}{}
+		}
 	}
 	all := make([]string, 0, len(uuidSet))
 	for u := range uuidSet {
@@ -518,14 +518,17 @@ func (s *CKLoaderService) syncTopologyBatch(metas map[string]meta, frames map[st
 		}
 	}
 
-	// 2. 批量确保 Node
 	// 2a. 收集所有需要写入的节点（不在缓存中 或 gpuCount 变化的）
 	type nodeInfo struct {
-		clusterID uint64
-		sn        string
-		ip        string
-		gpuCount  int
+		clusterID  uint64
+		sn         string
+		ip         string
+		gpuCount   int
+		podID      string
+		buildingID string
+		idcID      string
 	}
+
 	needUpsertNodes := map[string]nodeInfo{}
 	for _, m := range metas {
 		cid, ok := s.clusterCache[m.source]
@@ -538,7 +541,8 @@ func (s *CKLoaderService) syncTopologyBatch(metas map[string]meta, frames map[st
 				continue // 缓存命中且 gpuCount 没变，跳过
 			}
 		}
-		needUpsertNodes[m.sn] = nodeInfo{clusterID: cid, sn: m.sn, ip: m.ip, gpuCount: gpuCnt}
+		needUpsertNodes[m.sn] = nodeInfo{clusterID: cid, sn: m.sn, ip: m.ip, gpuCount: gpuCnt,
+			podID: m.podID, buildingID: m.buildingID, idcID: m.idcID}
 	}
 
 	// 2b. 批量 upsert 节点
@@ -547,11 +551,12 @@ func (s *CKLoaderService) syncTopologyBatch(metas map[string]meta, frames map[st
 		for _, n := range needUpsertNodes {
 			batch = append(batch, model.Node{
 				ClusterID: n.clusterID, Hostname: n.sn, IP: n.ip, GPUCount: n.gpuCount,
+				PodID: n.podID, BuildingID: n.buildingID, IdcID: n.idcID,
 			})
 		}
 		if err := s.topo.DB().Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "hostname"}},
-			DoUpdates: clause.AssignmentColumns([]string{"gpu_count", "ip", "updated_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"gpu_count", "ip", "pod_id", "building_id", "idc_id", "updated_at"}),
 		}).CreateInBatches(batch, 500).Error; err != nil {
 			logger.L.Errorf("批量 upsert node 失败: %v", err)
 		}
@@ -581,12 +586,10 @@ func (s *CKLoaderService) syncTopologyBatch(metas map[string]meta, frames map[st
 			skipped[uuid] = struct{}{}
 			continue
 		}
-		idx, err := strconv.Atoi(m.tags)
-
-		if err != nil {
-			logger.L.Warnf("卡 %s 的 tags=%q 不是合法卡序号，跳过入库", uuid, m.tags)
-			skipped[uuid] = struct{}{}
-			continue
+		// 卡号只用于展示：v2 表里 tags 可能为空，不能再作为入库前提
+		idx := -1
+		if v, err := strconv.Atoi(strings.TrimSpace(m.tags)); err == nil {
+			idx = v
 		}
 
 		vendor, cardType := detectDevice(frames[uuid].Metrics)
@@ -596,15 +599,19 @@ func (s *CKLoaderService) syncTopologyBatch(metas map[string]meta, frames map[st
 			skipped[uuid] = struct{}{}
 			continue // ★ 判不出来就别入库，更别去评分
 		}
+		if v := vendorFromManufacturer(m.vendor); v != "" {
+			vendor = v // v2 表直接带了厂商，比按指标前缀猜更准
+		}
 		gpus = append(gpus, model.GPUCard{
 			UUID: uuid, NodeID: entry.id, ClusterID: cid,
 			GPUIndex: idx, SN: m.sn, Status: "online", Vendor: vendor, CardType: cardType,
+			Model: m.model, VRAM: m.vram, Platform: m.plat,
 		})
 	}
 	if len(gpus) > 0 {
 		if err := s.topo.DB().Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "uuid"}},
-			DoUpdates: clause.AssignmentColumns([]string{"node_id", "cluster_id", "gpu_index", "status", "vendor", "card_type", "updated_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"node_id", "cluster_id", "gpu_index", "vendor", "card_type", "model", "vram", "platform", "sn", "updated_at"}), // 不覆盖 status，保留手动"维护/下线"
 		}).CreateInBatches(gpus, 500).Error; err != nil {
 			logger.L.Errorf("批量 upsert gpu 失败: %v", err)
 		}
@@ -693,7 +700,10 @@ func (s *CKLoaderService) persistSampleStatus(allRows []ckclient.SampleRow) {
 	offline := make([]string, 0)
 	seen := map[string]struct{}{}
 	for _, r := range allRows {
-		u := gpuUUID(r.SN, r.Tags)
+		u := strings.TrimSpace(r.GPUSN)
+		if u == "" {
+			continue
+		}
 		if _, ok := seen[u]; ok {
 			continue
 		}
@@ -719,15 +729,10 @@ func (s *CKLoaderService) persistSampleStatus(allRows []ckclient.SampleRow) {
 }
 
 func (s *CKLoaderService) rebuildSampledSNs() {
-	set := map[string]struct{}{}
+	// uuid 就是 gpu_sn，直接展开成 IN 列表
+	s.sampledGPUSNs = s.sampledGPUSNs[:0]
 	for u := range s.sampledUUIDs {
-		if i := strings.LastIndex(u, ":"); i > 0 { // uuid = sn:tags，tags 是数字序号
-			set[u[:i]] = struct{}{}
-		}
-	}
-	s.sampledSNs = s.sampledSNs[:0]
-	for sn := range set {
-		s.sampledSNs = append(s.sampledSNs, sn)
+		s.sampledGPUSNs = append(s.sampledGPUSNs, u)
 	}
 }
 
@@ -747,4 +752,18 @@ func (s *CKLoaderService) loadSampleFromDB() {
 		s.sampledUUIDs[u] = struct{}{}
 	}
 	s.rebuildSampledSNs()
+}
+
+// vendorFromManufacturer 把 v2 表的 gpu_manufacturer 归一到内部厂商码
+func vendorFromManufacturer(s string) string {
+	l := strings.ToLower(strings.TrimSpace(s))
+	switch {
+	case l == "":
+		return ""
+	case strings.Contains(l, "nvidia"):
+		return "nvidia"
+	case strings.Contains(l, "huawei"), strings.Contains(s, "华为"), strings.Contains(l, "ascend"), strings.Contains(s, "昇腾"):
+		return "huawei"
+	}
+	return ""
 }

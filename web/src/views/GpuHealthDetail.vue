@@ -43,8 +43,11 @@
               <div><label>集群</label><span>{{ meta?.cluster_name || '—' }}</span></div>
               <div><label>节点 IP</label><span class="mono">{{ meta?.node_ip || '—' }}</span></div>
               <div><label>机器 SN</label><span class="mono">{{ meta?.sn || '—' }}</span></div>
-              <div><label>卡序号</label><span class="mono">{{ meta?.gpu_index ?? '—' }}</span></div>
+              <div><label>卡序号</label><span class="mono">{{ (meta?.gpu_index ?? -1) >= 0 ? meta.gpu_index : '—' }}</span></div>
               <div><label>型号</label><span>{{ meta?.model || '—' }}</span></div>
+              <div><label>显存</label><span>{{ meta?.vram || '—' }}</span></div>
+              <div><label>平台</label><span>{{ meta?.platform || '—' }}</span></div>
+              <div><label>POD / 机房</label><span class="mono">{{ meta?.pod_id || '—' }} / {{ meta?.idc_id || '—' }}</span></div>
               <div><label>健康等级</label>
                 <span :class="`level-badge lv-${snapshot?.level}`">{{ levelNames[snapshot?.level] || snapshot?.level || '—' }}</span></div>
               <div><label>一票否决</label>

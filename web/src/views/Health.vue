@@ -91,36 +91,75 @@
                         <n-input v-model:value="editStrategy.description" type="textarea" :autosize="{ minRows: 1, maxRows: 3 }" placeholder="策略说明" />
                   </div>
                </div>
-
-                <!-- 维度权重输入区域 -->
+                <!-- 维度 + 维度内指标权重：与评分公式一一对应 -->
                 <div class="dimension-weights">
-                  <div class="section-title">维度权重设置</div>
-                  <div class="weights-grid">
-                    <div class="weight-item" v-for="(w, key) in dimensionWeights" :key="key">
-                      <label>{{ dimNameMap[key] || key }} ({{ key }})</label>
-                      <n-input-number
-                        v-model:value="dimensionWeights[key]"
-                        :min="0" :max="1" :step="0.05" :precision="2"
-                        placeholder="0.00-1.00" />
-                    </div>
+                  <div class="section-title" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                    <span>维度与指标权重</span>
+                    <span class="formula mono">维度分 = Σ(指标分 × 指标权重) ÷ Σ指标权重　→　总分 = Σ(维度分 × 维度权重)</span>
+                    <n-button size="tiny" type="primary" ghost style="margin-left:auto"
+                              @click="showAddMetric = true">+ 添加指标</n-button>
                   </div>
 
-                  <!-- 权重和验证显示 -->
                   <div class="weight-summary">
                     <div class="weight-total">
-                      权重总和: <span :class="{'valid': isWeightValid, 'invalid': !isWeightValid}">{{ weightTotal.toFixed(2) }}</span>
-                      <span v-if="!isWeightValid" class="error-text"> (必须为 1.00)</span>
+                      维度权重总和：<span :class="{'valid': isWeightValid, 'invalid': !isWeightValid}">{{ weightTotal.toFixed(2) }}</span>
+                      <span v-if="!isWeightValid" class="error-text">（必须为 1.00，否则保存会被拒绝）</span>
                     </div>
-                    <div class="weight-hint">
-                      提示：各维度权重之和必须等于 1.00
+                    <n-button size="tiny" @click="normalizeDimWeightsToOne">按当前比例归一化</n-button>
+                  </div>
+
+                  <div v-for="g in groupedEditRules" :key="g.dim" class="dim-card" :class="{ 'dim-card-orphan': !g.declared }">
+                    <div class="dim-head">
+                      <div class="dim-name">
+                        {{ dimLabel(g.dim) }}
+                        <span class="dim-key mono">{{ g.dim }}</span>
+                        <span class="dim-count">{{ g.rules.length }} 个指标</span>
+                      </div>
+                      <div class="dim-weight">
+                        <template v-if="g.declared">
+                          <span class="dim-weight-label">维度权重</span>
+                          <n-input-number v-model:value="dimensionWeights[g.dim]" :min="0" :max="1"
+                                          :step="0.01" :precision="2" size="small" style="width:112px" />
+                        </template>
+                        <n-button v-else size="tiny" type="warning" ghost @click="addDimWeight(g.dim)">
+                          未配置维度权重，不计入总分（点击加入）
+                        </n-button>
+                      </div>
+                    </div>
+
+                    <div v-if="!g.rules.length" class="dim-empty">该维度下没有指标，不参与计算</div>
+                    <table v-else class="rule-table">
+                      <thead>
+                        <tr>
+                          <th>指标</th>
+                          <th style="width:130px">维度内权重</th>
+                          <th style="width:86px">占比</th>
+                          <th style="width:92px">一票否决</th>
+                          <th style="width:130px">否决阈值</th>
+                          <th style="width:72px"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="r in g.rules" :key="r.metric_key">
+                          <td>
+                            <div class="rule-name">{{ metaOf[r.metric_key]?.concept || r.metric_key }}</div>
+                            <div class="rule-key mono">{{ r.metric_key }}</div>
+                          </td>
+                          <td><n-input-number v-model:value="r.weight" :min="0" :step="0.5" size="tiny" style="width:112px" /></td>
+                          <td class="mono rule-pct">{{ g.sum > 0 ? ((Number(r.weight) || 0) / g.sum * 100).toFixed(1) + '%' : '—' }}</td>
+                          <td><n-switch v-model:value="r.is_veto" size="small" /></td>
+                          <td><n-input-number v-model:value="r.veto_threshold" :min="0" size="tiny" style="width:112px" /></td>
+                          <td><n-button size="tiny" type="error" ghost @click="removeRule(r)">移除</n-button></td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    <div class="dim-foot">
+                      维度内权重和 {{ g.sum.toFixed(2) }}（只看比例，不要求等于 1）
+                      <span v-if="g.declared">　·　该维度最多影响总分 {{ ((dimensionWeights[g.dim] || 0) * 100).toFixed(0) }} 分</span>
                     </div>
                   </div>
                 </div>
-            <div class="rules-title" style="display:flex;align-items:center;justify-content:space-between;">
-              <span>指标权重 / 曲线 / 一票否决</span>
-              <n-button size="tiny" type="primary" ghost @click="showAddMetric = true">+ 添加指标</n-button>
-            </div>
-            <n-data-table :columns="ruleCols" :data="editRules" :bordered="false" size="small" :max-height="380" :row-key="ruleRowKey" />
             <n-space justify="end" style="margin-top: 16px">
               <n-button @click="editStrategy = null">取消</n-button>
               <n-button type="primary" @click="saveStrategy">保存（5秒内热加载生效）</n-button>
@@ -178,7 +217,7 @@
                @update:value="(val) => onRuleWeightChange(r.metric_key, val)"
                :min="0" :step="0.5" :precision="2" size="small"
                style="width: 100px" :disabled="!r.enabled" />
-            <span class="curve-tag">{{ r.curve_type }}<span v-if="r.is_veto" class="veto-tag">否决</span></span>
+            <span class="curve-tag"><span v-if="r.is_veto" class="veto-tag">否决</span></span>
           </div>
         </div>
       </div>
@@ -593,6 +632,53 @@ const weightTotal = computed(() => {
   return Object.values(dimensionWeights.value).reduce((sum, w) => sum + Number(w || 0), 0);
 });
 
+// 指标定义索引：metric_key -> 定义（含中文名 concept 与所属维度 dimension）
+const metaOf = computed(() => {
+  const m: Record<string, any> = {};
+  for (const x of allMetrics.value) m[x.metric_name] = x;
+  return m;
+});
+
+function dimLabel(dim: string) {
+  if (dim === "__unknown__") return "未知维度（指标定义缺失）";
+  return dimNameMap[dim] || dim;
+}
+
+// 按维度分组：维度内是"指标 + 维度内权重"，维度本身有一个权重
+const groupedEditRules = computed(() => {
+  const groups: Record<string, any[]> = {};
+  for (const r of editRules.value) {
+    const dim = metaOf.value[r.metric_key]?.dimension || "__unknown__";
+    (groups[dim] = groups[dim] || []).push(r);
+  }
+  // 策略里声明了权重、但当前没有指标的维度也要显示出来
+  for (const dim of Object.keys(dimensionWeights.value)) groups[dim] = groups[dim] || [];
+  return Object.keys(groups)
+    .sort((a, b) => (dimensionWeights.value[b] ?? -1) - (dimensionWeights.value[a] ?? -1) || a.localeCompare(b))
+    .map((dim) => ({
+      dim,
+      declared: dim !== "__unknown__" && dim in dimensionWeights.value,
+      rules: groups[dim],
+      sum: groups[dim].reduce((s: number, r: any) => s + (Number(r.weight) || 0), 0),
+    }));
+});
+
+function addDimWeight(dim: string) {
+  if (dim !== "__unknown__") dimensionWeights.value = { ...dimensionWeights.value, [dim]: 0 };
+}
+function removeRule(r: any) {
+  editRules.value = editRules.value.filter((x: any) => x.metric_key !== r.metric_key);
+}
+// 维度权重必须和为 1：按当前比例等比缩放，省去手工凑数
+function normalizeDimWeightsToOne() {
+  const entries = Object.entries(dimensionWeights.value);
+  const sum = entries.reduce((s, [, v]) => s + (Number(v) || 0), 0);
+  if (sum <= 0) { message.warning("当前维度权重全为 0，无法归一化"); return; }
+  const next: Record<string, number> = {};
+  for (const [k, v] of entries) next[k] = Number(((Number(v) || 0) / sum).toFixed(4));
+  dimensionWeights.value = next;
+}
+
 // 验证权重是否有效
 const isWeightValid = computed(() => {
   return Math.abs(weightTotal.value - 1.0) < 0.001; // 允许0.001的浮点误差
@@ -608,42 +694,6 @@ const strategyCols = [
   { title: "操作", key: "ops", width: 90,
         render: (r: any) => h(NButton, { size: "tiny", loading: editLoadingId.value === r.id, onClick: () => openEditStrategy(r) }, () => "编辑") }
     ];
-
-const curveOptions = [
-  { label: "none", value: "none" }, { label: "piecewise", value: "piecewise" },
-  { label: "log", value: "log" }, { label: "xid_table", value: "xid_table" }, { label: "veto", value: "veto" }
-];
-
-const ruleCols = [
-  { title: "指标", key: "metric_key",
-    render: (r: any) => h("span", { class: "mono", style: "font-size:11px;color:#9aa7b4" }, r.metric_key) },
-  { title: "权重", key: "weight", width: 110,
-    render: (r: any) => h(NInputNumber, {
-      value: r.weight, size: "tiny", step: 0.5, min: 0,
-      "onUpdate:value": (v: number) => (r.weight = v ?? 0)
-    }) },
-  { title: "曲线", key: "curve_type", width: 130,
-    render: (r: any) => h(NSelect, {
-      value: r.curve_type, size: "tiny", options: curveOptions,
-      "onUpdate:value": (v: string) => (r.curve_type = v)
-    }) },
-  { title: "一票否决", key: "is_veto", width: 90,
-    render: (r: any) => h(NSwitch, {
-      value: r.is_veto, size: "small",
-      "onUpdate:value": (v: boolean) => (r.is_veto = v)
-    }) },
-  { title: "否决阈值", key: "veto_threshold", width: 110,
-    render: (r: any) => h(NInputNumber, {
-      value: r.veto_threshold, size: "tiny", min: 0,
-      "onUpdate:value": (v: number) => (r.veto_threshold = v ?? 0)
-    }) },
-  { title: "移除", key: "remove", width: 70,
-      render: (r: any) => h(NButton, {
-        size: "tiny", type: "error", ghost: true,
-        onClick: () => { editRules.value = editRules.value.filter((x: any) => x.metric_key !== r.metric_key); }
-      }, () => "移除") }
-
-];
 
 const strategyLoading = ref(false);
 const strategyRowKey = (r: any) => r.id;
@@ -712,8 +762,25 @@ function parseDimWeights(raw: any): Record<string, number> {
 async function openEditStrategy(r: any) {
   editLoadingId.value = r.id;
   try {
+    // 先拿指标定义：编辑区要按"指标所属维度"分组展示，没有它就只能显示成未知维度
+    if (!allMetrics.value.length) {
+      try {
+        const res = await api.metrics({ is_health_key: true, limit: 200 });
+        allMetrics.value = res?.items || [];
+      } catch {
+        message.warning("指标定义加载失败，维度分组可能不准确");
+      }
+    }
     const full = await api.strategy(r.id);
     if (!full || !full.id) throw new Error("策略详情为空");
+再把 openEditStrategy 末尾这段整体删除（指标已经在上面加载了）：
+ts
+  try { // 指标下拉单独加载，失败不影响编辑权重
+    const res = await api.metrics({ is_health_key: true, limit: 200 });
+    allMetrics.value = res?.items || [];
+  } catch {
+    message.warning("指标列表加载失败，“添加指标”暂不可用");
+  }
     dimensionWeights.value = parseDimWeights(full.dimension_weights);
     editRules.value = (full.rules || []).map((x: any) => ({ ...x }));
     editStrategy.value = full;
@@ -910,8 +977,6 @@ async function doCreateStrategy() {
   const rules = selected.map((r: any) => ({
     metric_key: r.metric_key,
     weight: r.weight,
-    curve_type: r.curve_type,
-    curve_params: r.curve_params,
     is_veto: r.is_veto,
     veto_threshold: r.veto_threshold
   }));
@@ -1033,6 +1098,27 @@ async function deleteStrategy(row: any) {
   font-size: 12px;
   color: var(--text-2);
 }
+
+.formula { font-size: 11px; color: var(--text-2); font-weight: 400; }
+.dim-card { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 14px; overflow: hidden; }
+.dim-card-orphan { border-color: rgba(234,179,8,.5); }
+.dim-head { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 14px; background: var(--bg-2); }
+.dim-name { font-size: 13px; font-weight: 600; color: var(--text-0); display: flex; align-items: center; gap: 10px; }
+.dim-key { font-size: 11px; color: var(--text-2); font-weight: 400; }
+.dim-count { font-size: 11px; color: var(--text-2); font-weight: 400; }
+.dim-weight { display: flex; align-items: center; gap: 8px; }
+.dim-weight-label { font-size: 12px; color: var(--text-2); }
+.dim-empty { padding: 12px 14px; font-size: 12px; color: var(--text-2); }
+.dim-foot { padding: 8px 14px; font-size: 11px; color: var(--text-2); border-top: 1px solid var(--bg-2); }
+.rule-table { width: 100%; border-collapse: collapse; }
+.rule-table th { text-align: left; font-size: 11px; font-weight: 500; color: var(--text-2);
+  padding: 8px 14px; border-bottom: 1px solid var(--bg-2); }
+.rule-table td { padding: 6px 14px; border-bottom: 1px solid var(--bg-2); vertical-align: middle; }
+.rule-table tr:last-child td { border-bottom: none; }
+.rule-name { font-size: 12px; color: var(--text-0); }
+.rule-key { font-size: 11px; color: var(--text-2); }
+.rule-pct { font-size: 12px; color: var(--accent); }
 
 .weight-summary {
   padding: 12px;
